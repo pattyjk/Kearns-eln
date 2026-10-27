@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lab notebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --paper: #EEF3F0;
+  --sheet: #FAFCFA;
+  --grid: rgba(52, 118, 92, 0.085);
+  --ink: #1D2A36;
+  --muted: #56676D;
+  --rule: #C7D5CE;
+  --field: #FFFFFF;
+  --accent: #2350A3;
+  --accent-ink: #FFFFFF;
+  --margin: rgba(194, 69, 59, 0.5);
+  --margin-ink: #B0392F;
+  --ok: #276E45;
+  --warn: #A2421A;
+  --m: 3rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #111916;
+    --sheet: #17211D;
+    --grid: rgba(150, 210, 180, 0.055);
+    --ink: #E1EAE6;
+    --muted: #98AAA3;
+    --rule: #2E3D37;
+    --field: #1D2924;
+    --accent: #8DB2F6;
+    --accent-ink: #0E192C;
+    --margin: rgba(222, 120, 110, 0.45);
+    --margin-ink: #E3887F;
+    --ok: #74CC9A;
+    --warn: #E9996C;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--accent); }
+
+.top {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  gap: .5rem 1rem; padding: 1rem 1.5rem; padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid var(--rule); max-width: 78rem; margin: 0 auto;
+}
+.top h1 { font-size: 1.375rem; margin: 0; letter-spacing: -0.01em; }
+.status { font-size: .9375rem; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.warn { color: var(--warn); }
+
+.layout {
+  display: grid; grid-template-columns: 18rem minmax(0, 1fr); gap: 1.5rem;
+  padding: 1.5rem; max-width: 78rem; margin: 0 auto; align-items: start;
+}
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; padding: 1rem; } }
+
+/* Sidebar */
+.side details {
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); padding: .75rem 1rem;
+}
+.side summary { cursor: pointer; font-weight: 700; }
+.side label { display: block; font-size: .9375rem; margin-top: .75rem; font-weight: 700; }
+.side .hint { margin-top: .25rem; }
+.side .row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+#connMsg { font-size: .9375rem; margin: .75rem 0 0; }
+.entries { margin-top: 1.5rem; }
+.entries-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.entries h2 { font-size: 1.0625rem; margin: 0; }
+#entryList { list-style: none; padding: 0; margin: .5rem 0 0; max-height: 62vh; overflow: auto; }
+#entryList button {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  border-bottom: 1px solid var(--rule); padding: .5rem .25rem; font: inherit; color: inherit; cursor: pointer;
+}
+#entryList button:hover { color: var(--accent); }
+#entryList button[aria-current="true"] { color: var(--accent); font-weight: 700; }
+#entryList .d { display: block; font-size: .8125rem; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
+
+/* Controls */
+input, textarea, select {
+  font: inherit; color: inherit; background: var(--field);
+  border: 1px solid var(--rule); border-radius: 4px; padding: .5rem .625rem; width: 100%;
+}
+textarea { resize: vertical; min-height: 3.5rem; }
+input[type="file"] { padding: .375rem; }
+.hint { font-size: .875rem; color: var(--muted); margin: .125rem 0 .375rem; }
+button { font: inherit; }
+.primary {
+  background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 4px;
+  padding: .625rem 1.125rem; font-weight: 700; cursor: pointer;
+}
+.quiet {
+  background: transparent; color: var(--ink); border: 1px solid var(--rule); border-radius: 4px;
+  padding: .5625rem 1rem; cursor: pointer;
+}
+.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+button:disabled { opacity: .55; cursor: progress; }
+.msg { margin: 0; font-size: .9375rem; }
+.msg.ok { color: var(--ok); }
+.msg.warn { color: var(--warn); }
+
+/* The notebook page */
+.sheet {
+  position: relative;
+  background-color: var(--sheet);
+  background-image:
+    linear-gradient(to right, transparent var(--m), var(--margin) var(--m), var(--margin) calc(var(--m) + 1px), transparent calc(var(--m) + 1px)),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 100% 100%, 1.25rem 1.25rem, 1.25rem 1.25rem;
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: 1.25rem 1.5rem 0 calc(var(--m) + 1.25rem);
+  min-width: 0;
+}
+@media (max-width: 560px) { :root { --m: 2rem; } .sheet { padding-right: 1rem; padding-left: calc(var(--m) + .875rem); } }
+
+.tabs { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--rule); max-width: 46rem; }
+.tabs button {
+  background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  padding: .375rem 0; color: var(--muted); cursor: pointer;
+}
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 700; }
+
+.sec { position: relative; max-width: 46rem; margin: 0 0 2rem; }
+.sec h2 { font-size: 1.1875rem; margin: 0 0 .75rem; }
+.num {
+  position: absolute; top: -.2rem;
+  left: calc(-1 * (var(--m) + 1.25rem)); width: var(--m);
+  text-align: center; font-size: 1.625rem; font-weight: 700; line-height: 1.2;
+  color: var(--margin-ink); font-variant-numeric: lining-nums;
+}
+@media (max-width: 560px) { .num { left: calc(-1 * (var(--m) + .875rem)); font-size: 1.25rem; } }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; }
+@media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+.field { margin-bottom: 1.125rem; }
+.field > label { display: block; font-weight: 700; }
+.req { font-weight: 400; font-size: .8125rem; color: var(--muted); margin-left: .375rem; }
+.field.missing input, .field.missing textarea { border-color: var(--warn); border-width: 2px; }
+ul.files { list-style: none; padding: 0; margin: .5rem 0 0; }
+ul.files li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: .75rem;
+  padding: .3125rem 0; border-bottom: 1px dotted var(--rule); font-size: .9375rem; overflow-wrap: anywhere;
+}
+ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: .5rem; }
+
+.commitbar {
+  position: sticky; bottom: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .75rem;
+  background: var(--sheet); border-top: 1px solid var(--rule);
+  margin: 0 -1.5rem 0 calc(-1 * (var(--m) + 1.25rem));
+  padding: .875rem 1.5rem calc(.875rem + env(safe-area-inset-bottom, 0px)) 1.25rem;
+  border-radius: 0 0 6px 6px;
+}
+@media (max-width: 560px) { .commitbar { margin: 0 -1rem 0 calc(-1 * (var(--m) + .875rem)); padding-right: 1rem; } }
+.commitbar .msg { margin-right: auto; flex: 1 1 14rem; }
+
+/* Rendered entries */
+.md { max-width: 46rem; overflow-wrap: break-word; padding-bottom: 1.5rem; }
+.md h1 { font-size: 1.75rem; line-height: 1.2; margin: 0 0 .75rem; letter-spacing: -0.01em; }
+.md h2 { font-size: 1.1875rem; margin: 1.75rem 0 .5rem; }
+.md h3 { font-size: 1.0625rem; margin: 1.25rem 0 .5rem; }
+.md ul { padding-left: 1.25rem; }
+.md img { max-width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
+.md pre { overflow-x: auto; background: var(--field); border: 1px solid var(--rule); border-radius: 4px; padding: .75rem; font-size: .9375rem; }
+.md code { font-size: .9375em; }
+.md table { display: block; overflow-x: auto; border-collapse: collapse; }
+.md th, .md td { border: 1px solid var(--rule); padding: .375rem .625rem; text-align: left; }
+.md hr { border: 0; border-top: 1px dashed var(--margin-ink); margin: 2rem 0; opacity: .7; }
+.md blockquote { margin: 0; padding-left: 1rem; border-left: 3px solid var(--rule); color: var(--muted); }
+
+.viewer-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .75rem 1rem; margin-bottom: 1.25rem; max-width: 46rem; }
+.addendum { border-top: 1px solid var(--rule); margin-top: .5rem; padding: 1.25rem 0 1.5rem; max-width: 46rem; }
+.addendum h2 { font-size: 1.1875rem; margin: 0 0 .25rem; }
+.addendum .row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: .75rem; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Lab notebook</h1>
+  <span id="status" class="status" role="status">Not connected</span>
+</header>
+
+<div class="layout">
+  <aside class="side">
+    <details id="connDetails" open>
+      <summary>Connection</summary>
+      <form id="connForm" autocomplete="off">
+        <label for="owner">GitHub account or organization</label>
+        <input id="owner" required spellcheck="false">
+        <label for="repo">Notebook repository</label>
+        <input id="repo" required spellcheck="false">
+        <label for="branch">Branch</label>
+        <input id="branch" value="main" required spellcheck="false">
+        <label for="author">Your name</label>
+        <p class="hint">Printed on every entry you save.</p>
+        <input id="author" required>
+        <label for="token">Access token</label>
+        <p class="hint">A fine-grained token with Contents: Read and write on this one repository. It stays in this browser and is only sent to GitHub.</p>
+        <input id="token" type="password" required spellcheck="false">
+        <div class="row">
+          <button class="primary" type="submit" id="connectBtn">Connect</button>
+          <button class="quiet" type="button" id="forgetBtn">Forget token</button>
+        </div>
+        <p id="connMsg" class="msg" role="status"></p>
+      </form>
+    </details>
+
+    <section class="entries" aria-labelledby="entriesTitle">
+      <div class="entries-head">
+        <h2 id="entriesTitle">Entries</h2>
+        <button class="link" type="button" id="newBtn">New entry</button>
+      </div>
+      <p id="entriesEmpty" class="hint">Connect to see your saved entries.</p>
+      <ol id="entryList"></ol>
+    </section>
+  </aside>
+
+  <main>
+    <section id="editor" class="sheet" aria-label="New entry">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tabWrite" aria-selected="true" aria-controls="entryForm">Write</button>
+        <button type="button" role="tab" id="tabPreview" aria-selected="false" aria-controls="preview">Preview</button>
+      </div>
+      <form id="entryForm" novalidate></form>
+      <div id="preview" class="md" hidden></div>
+      <div class="commitbar">
+        <p id="commitMsg" class="msg" role="status">Your text is kept as a draft in this browser until you save.</p>
+        <button type="button" class="quiet" id="discardBtn">Discard draft</button>
+        <button type="button" class="primary" id="commitBtn">Save entry to notebook</button>
+      </div>
+    </section>
+
+    <section id="viewer" class="sheet" hidden aria-label="Saved entry">
+      <div class="viewer-head">
+        <button type="button" class="quiet" id="backBtn">New entry</button>
+        <a id="historyLink" target="_blank" rel="noopener">View version history on GitHub</a>
+      </div>
+      <p id="viewMsg" class="msg" role="status"></p>
+      <article id="viewBody" class="md"></article>
+      <div class="addendum">
+        <h2>Add an addendum</h2>
+        <p class="hint">Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and GitHub keeps every earlier version.</p>
+        <label for="addText" class="hint">Addendum text</label>
+        <textarea id="addText" rows="4"></textarea>
+        <div class="row">
+          <button type="button" class="primary" id="addBtn">Append addendum</button>
+          <p id="addMsg" class="msg" role="status"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    del(k) { try { localStorage.removeItem(k); } catch {} }
+  };
+  const CFG_KEY = "eln-config", DRAFT_KEY = "eln-draft";
+  const MAX_FILE = 25 * 1024 * 1024;
+
+  /* ---------- Entry template ---------- */
+  const SECTIONS = ["Entry", "Question and hypothesis", "Materials", "Procedure", "Results", "Interpretation"];
+  const FIELDS = [
+    { sec: 0, id: "title", label: "Experiment title", type: "text", req: true },
+    { sec: 0, id: "date", label: "Date performed", type: "date", req: true },
+    { sec: 0, id: "course", label: "Course or project", type: "text" },
+    { sec: 0, id: "collab", label: "Worked with", type: "text", hint: "Lab partners or collaborators" },
+    { sec: 1, id: "question", label: "Question", rows: 2, hint: "What are you trying to find out?" },
+    { sec: 1, id: "hypothesis", label: "Hypothesis", rows: 3, req: true, hint: "What you expect to happen, and the mechanism you think is responsible." },
+    { sec: 1, id: "prediction", label: "Prediction", rows: 2, hint: "If the hypothesis is right, what will you observe? What result would show it’s wrong?" },
+    { sec: 2, id: "materials", label: "Materials and reagents", rows: 4, hint: "Reagents with supplier and lot number, samples or strains, kits, equipment." },
+    { sec: 3, id: "procedure", label: "Procedure", rows: 7, req: true, hint: "What you actually did, in order. Include volumes, concentrations, times and temperatures." },
+    { sec: 3, id: "deviations", label: "Deviations from the protocol", rows: 2, hint: "Anything that differed from the plan, and why." },
+    { sec: 4, id: "observations", label: "Observations and results", rows: 7, req: true, hint: "Raw observations and measurements as you recorded them, before interpretation." },
+    { sec: 4, id: "files", label: "Data files", type: "file", hint: "Gel images, plate reader exports, spreadsheets. Each file is saved in the notebook next to this entry." },
+    { sec: 5, id: "interpretation", label: "Interpretation", rows: 4, hint: "Do the results support the prediction? What else could explain them?" },
+    { sec: 5, id: "next", label: "Next steps", rows: 2 }
+  ];
+  const TEXT_FIELDS = FIELDS.filter(f => f.type !== "file");
+
+  /* ---------- State ---------- */
+  let cfg = Object.assign({ owner: "", repo: "", branch: "main", token: "", author: "" }, store.get(CFG_KEY) || {});
+  const qp = new URLSearchParams(location.search);
+  ["owner", "repo", "branch"].forEach(k => { if (qp.get(k)) cfg[k] = qp.get(k); });
+  let connected = false;
+  let attachments = []; // { file, name, url }
+  let currentView = null;
+  let busy = false;
+
+  /* ---------- Utilities ---------- */
+  const todayLocal = () => { const t = new Date(); return new Date(t - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  const stamp = () => { const t = new Date(); const l = new Date(t - t.getTimezoneOffset() * 60000).toISOString(); return `${l.slice(0, 10)} ${l.slice(11, 16)}`; };
+  const slugify = (s) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "entry";
+  const safeName = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "file";
+  const isImage = (n) => /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
+  const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+  const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
+  const esc = (s) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function bytesToB64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  const utf8ToB64 = (str) => bytesToB64(new TextEncoder().encode(str));
+  const b64ToUtf8 = (b64) => {
+    const bin = atob(b64.replace(/\s/g, ""));
+    return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+  };
+  function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
+  function setStatus(text, kind) { const s = $("status"); s.textContent = text; s.className = "status" + (kind ? " " + kind : ""); }
+
+  /* ---------- GitHub API ---------- */
+  function friendly(status, m) {
+    if (status === 401) return "GitHub rejected the access token. It may have expired or been mistyped. Create a new token and connect again.";
+    if (status === 403 && /rate limit/i.test(m)) return "GitHub’s rate limit was reached. Wait a few minutes and try again.";
+    if (status === 403) return "The token doesn’t have permission for this. It needs Contents: Read and write on this repository" + (m ? ` (GitHub said: ${m})` : "") + ".";
+    if (status === 404) return "GitHub couldn’t find that repository, branch or file. Check the names, and that the token was given access to this repository.";
+    if (status === 409) return "The notebook changed on GitHub while you were working. Open the entry again and retry.";
+    if (status === 422 || status === 413) return "GitHub refused the file" + (m ? `: ${m}` : "") + ".";
+    return `GitHub returned an error (${status})` + (m ? `: ${m}` : "") + ".";
+  }
+  async function api(path, opts = {}, accept = "application/vnd.github+json") {
+    let res;
+    try {
+      res = await fetch("https://api.github.com" + path, {
+        ...opts,
+        headers: {
+          Authorization: `Bearer ${cfg.token}`,
+          Accept: accept,
+          "X-GitHub-Api-Version": "2022-11-28",
+          ...(opts.body ? { "Content-Type": "application/json" } : {})
+        }
+      });
+    } catch {
+      const e = new Error("Couldn’t reach GitHub. Check your internet connection and try again.");
+      e.status = 0; throw e;
+    }
+    if (!res.ok) {
+      let m = ""; try { m = (await res.json()).message || ""; } catch {}
+      const e = new Error(friendly(res.status, m)); e.status = res.status; throw e;
+    }
+    return res;
+  }
+  const repoBase = () => `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}`;
+  const contentsUrl = (p) => `${repoBase()}/contents/${encPath(p)}`;
+  async function exists(p) {
+    try { await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`); return true; }
+    catch (e) { if (e.status === 404) return false; throw e; }
+  }
+  async function putFile(p, b64, message, sha) {
+    const body = { message, content: b64, branch: cfg.branch };
+    if (sha) body.sha = sha;
+    const res = await api(contentsUrl(p), { method: "PUT", body: JSON.stringify(body) });
+    return res.json();
+  }
+  async function getText(p) {
+    const res = await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`);
+    const j = await res.json();
+    if (j.content) return { text: b64ToUtf8(j.content), sha: j.sha };
+    const raw = await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`, {}, "application/vnd.github.raw+json");
+    return { text: await raw.text(), sha: j.sha };
+  }
+  async function getBlobUrl(p) {
+    const res = await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`, {}, "application/vnd.github.raw+json");
+    return URL.createObjectURL(await res.blob());
+  }
+
+  /* ---------- Build the form ---------- */
+  function buildForm() {
+    const form = $("entryForm");
+    SECTIONS.forEach((title, i) => {
+      const sec = document.createElement("section");
+      sec.className = "sec";
+      sec.setAttribute("aria-labelledby", `sec${i}`);
+      sec.innerHTML = `<h2 id="sec${i}">${i ? `<span class="num" aria-hidden="true">${i}</span>` : ""}${esc(title)}</h2>`;
+      const wrap = document.createElement("div");
+      if (i === 0) wrap.className = "grid2";
+      FIELDS.filter(f => f.sec === i).forEach(f => {
+        const d = document.createElement("div");
+        d.className = "field"; d.id = `f-${f.id}`;
+        const hintId = f.hint ? `${f.id}-hint` : "";
+        let control;
+        if (f.type === "file") {
+          control = `<input id="${f.id}" type="file" multiple ${hintId ? `aria-describedby="${hintId}"` : ""}><ul class="files" id="fileList"></ul>`;
+        } else if (f.type) {
+          control = `<input id="${f.id}" type="${f.type}" ${f.req ? "required" : ""} ${hintId ? `aria-describedby="${hintId}"` : ""}>`;
+        } else {
+          control = `<textarea id="${f.id}" rows="${f.rows}" ${f.req ? "required" : ""} ${hintId ? `aria-describedby="${hintId}"` : ""}></textarea>`;
+        }
+        d.innerHTML = `<label for="${f.id}">${esc(f.label)}${f.req ? '<span class="req">required</span>' : ""}</label>` +
+          (f.hint ? `<p class="hint" id="${hintId}">${esc(f.hint)}</p>` : "") + control;
+        wrap.appendChild(d);
+      });
+      sec.appendChild(wrap);
+      form.appendChild(sec);
+    });
+    $("date").value = todayLocal();
+  }
+
+  function values() {
+    const v = {};
+    TEXT_FIELDS.forEach(f => { v[f.id] = $(f.id).value; });
+    v.author = cfg.author || "";
+    return v;
+  }
+
+  /* ---------- Draft ---------- */
+  function saveDraft() { store.set(DRAFT_KEY, values()); }
+  function restoreDraft() {
+    const d = store.get(DRAFT_KEY);
+    if (!d) return;
+    TEXT_FIELDS.forEach(f => { if (typeof d[f.id] === "string" && d[f.id] !== "") $(f.id).value = d[f.id]; });
+  }
+  function clearForm() {
+    TEXT_FIELDS.forEach(f => { $(f.id).value = ""; });
+    $("date").value = todayLocal();
+    attachments.forEach(a => URL.revokeObjectURL(a.url));
+    attachments = [];
+    renderFiles();
+    document.querySelectorAll(".field.missing").forEach(el => el.classList.remove("missing"));
+    store.del(DRAFT_KEY);
+  }
+
+  /* ---------- Attachments ---------- */
+  function addFiles(list) {
+    const rejected = [];
+    for (const file of list) {
+      if (file.size > MAX_FILE) { rejected.push(file.name); continue; }
+      let name = safeName(file.name), n = 2;
+      const stem = name.replace(/(\.[^.]+)?$/, ""), ext = (name.match(/\.[^.]+$/) || [""])[0];
+      while (attachments.some(a => a.name === name)) name = `${stem}-${n++}${ext}`;
+      attachments.push({ file, name, url: URL.createObjectURL(file) });
+    }
+    renderFiles();
+    if (rejected.length) setMsg($("commitMsg"), `Not attached (over 25 MB): ${rejected.join(", ")}. Store large files elsewhere and note their location in the entry.`, "warn");
+  }
+  function renderFiles() {
+    const ul = $("fileList");
+    ul.innerHTML = "";
+    attachments.forEach((a, i) => {
+      const li = document.createElement("li");
+      const span = document.createElement("span");
+      span.textContent = a.name;
+      const size = document.createElement("span");
+      size.className = "size"; size.textContent = fmtSize(a.file.size);
+      span.appendChild(size);
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "link"; rm.textContent = "Remove";
+      rm.setAttribute("aria-label", `Remove ${a.name}`);
+      rm.onclick = () => { URL.revokeObjectURL(a.url); attachments.splice(i, 1); renderFiles(); };
+      li.append(span, rm);
+      ul.appendChild(li);
+    });
+  }
+
+  /* ---------- Markdown ---------- */
+  function buildMarkdown(v, assetBase) {
+    const L = [];
+    const yaml = (k, val) => { if (val && val.trim()) L.push(`${k}: ${JSON.stringify(val.trim())}`); };
+    L.push("---");
+    yaml("title", v.title);
+    L.push(`date: ${v.date}`);
+    yaml("author", v.author);
+    yaml("course", v.course);
+    L.push(`recorded: ${new Date().toISOString()}`, "---", "");
+    L.push(`# ${v.title.trim()}`, "");
+    L.push(`- **Date performed:** ${v.date}`);
+    if (v.author.trim()) L.push(`- **Recorded by:** ${v.author.trim()}`);
+    if (v.course.trim()) L.push(`- **Course or project:** ${v.course.trim()}`);
+    if (v.collab.trim()) L.push(`- **Worked with:** ${v.collab.trim()}`);
+    L.push("");
+    const sec = (h, text, fallback) => {
+      const t = (text || "").trim();
+      if (t || fallback) L.push(`## ${h}`, "", t || fallback, "");
+    };
+    sec("Question", v.question);
+    sec("Hypothesis", v.hypothesis);
+    sec("Prediction", v.prediction);
+    sec("Materials and reagents", v.materials);
+    sec("Procedure", v.procedure);
+    sec("Deviations from the protocol", v.deviations, "_None recorded._");
+    sec("Observations and results", v.observations);
+    if (attachments.length) {
+      L.push("### Data files", "");
+      attachments.filter(a => isImage(a.name)).forEach(a => L.push(`![${a.name}](${assetBase}/${a.name})`, ""));
+      const others = attachments.filter(a => !isImage(a.name));
+      others.forEach(a => L.push(`- [${a.name}](${assetBase}/${a.name})`));
+      if (others.length) L.push("");
+    }
+    sec("Interpretation", v.interpretation);
+    sec("Next steps", v.next);
+    return L.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  }
+
+  function renderMarkdown(md, el) {
+    const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, "");
+    let html;
+    if (window.marked && window.DOMPurify) {
+      html = DOMPurify.sanitize(marked.parse(body));
+    } else {
+      html = `<pre>${esc(body)}</pre>`;
+    }
+    el.innerHTML = html;
+  }
+
+  function resolvePath(dir, rel) {
+    const parts = dir.split("/").filter(Boolean);
+    for (const seg of rel.split("/")) {
+      if (seg === "..") parts.pop();
+      else if (seg && seg !== ".") parts.push(decodeURIComponent(seg));
+    }
+    return parts.join("/");
+  }
+  const isRelative = (u) => u && !/^([a-z][a-z0-9+.\-]*:|#|\/\/)/i.test(u);
+
+  /* ---------- Tabs ---------- */
+  function showTab(preview) {
+    $("tabWrite").setAttribute("aria-selected", String(!preview));
+    $("tabPreview").setAttribute("aria-selected", String(preview));
+    $("entryForm").hidden = preview;
+    $("preview").hidden = !preview;
+    if (preview) {
+      renderMarkdown(buildMarkdown(values(), "assets/preview"), $("preview"));
+      $("preview").querySelectorAll("img").forEach(img => {
+        const name = (img.getAttribute("src") || "").split("/").pop();
+        const a = attachments.find(x => x.name === name);
+        if (a) img.src = a.url;
+      });
+    }
+  }
+
+  /* ---------- Views ---------- */
+  function showEditor() {
+    currentView = null;
+    $("viewer").hidden = true;
+    $("editor").hidden = false;
+    markCurrent();
+  }
+  async function viewEntry(path) {
+    if (!connected) return;
+    currentView = { path, sha: null, text: "" };
+    $("editor").hidden = true;
+    $("viewer").hidden = false;
+    setMsg($("viewMsg"), "");
+    setMsg($("addMsg"), "");
+    $("viewBody").innerHTML = '<p class="hint">Opening entry…</p>';
+    $("historyLink").href = `https://github.com/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/commits/${encodeURIComponent(cfg.branch)}/${encPath(path)}`;
+    markCurrent();
+    try {
+      const { text, sha } = await getText(path);
+      if (!currentView || currentView.path !== path) return;
+      currentView.sha = sha; currentView.text = text;
+      renderEntry(path, text);
+    } catch (e) {
+      $("viewBody").innerHTML = "";
+      setMsg($("viewMsg"), e.message, "warn");
+    }
+  }
+  function renderEntry(path, text) {
+    const body = $("viewBody");
+    renderMarkdown(text, body);
+    const dir = path.split("/").slice(0, -1).join("/");
+    body.querySelectorAll("img").forEach(async img => {
+      const src = img.getAttribute("src");
+      if (!isRelative(src)) return;
+      img.alt = img.alt || src;
+      try { img.src = await getBlobUrl(resolvePath(dir, src)); } catch { img.replaceWith(document.createTextNode(`[image not found: ${src}]`)); }
+    });
+    body.querySelectorAll("a").forEach(a => {
+      const href = a.getAttribute("href");
+      if (!isRelative(href)) { a.target = "_blank"; a.rel = "noopener"; return; }
+      a.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        try {
+          const url = await getBlobUrl(resolvePath(dir, href));
+          const tmp = document.createElement("a");
+          tmp.href = url; tmp.download = href.split("/").pop();
+          document.body.appendChild(tmp); tmp.click(); tmp.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) { setMsg($("viewMsg"), e.message, "warn"); }
+      });
+    });
+  }
+
+  /* ---------- Entries list ---------- */
+  function markCurrent() {
+    document.querySelectorAll("#entryList button").forEach(b => {
+      b.setAttribute("aria-current", String(!!currentView && b.dataset.path === currentView.path));
+    });
+  }
+  async function loadEntries() {
+    const list = $("entryList"), empty = $("entriesEmpty");
+    try {
+      const res = await api(`${repoBase()}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
+      const tree = (await res.json()).tree || [];
+      const paths = tree.filter(t => t.type === "blob" && /^entries\/.+\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
+        .map(t => t.path)
+        .sort((a, b) => b.split("/").pop().localeCompare(a.split("/").pop()));
+      list.innerHTML = "";
+      empty.hidden = paths.length > 0;
+      empty.textContent = "No entries yet. Your first saved entry will appear here.";
+      paths.forEach(p => {
+        const file = p.split("/").pop().replace(/\.md$/i, "");
+        const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
+        const date = m ? m[1] : "";
+        const words = (m ? m[2] : file).replace(/-/g, " ").trim() || "Untitled";
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button"; b.dataset.path = p;
+        b.textContent = words.charAt(0).toUpperCase() + words.slice(1);
+        if (date) { const d = document.createElement("span"); d.className = "d"; d.textContent = date; b.prepend(d); }
+        b.onclick = () => viewEntry(p);
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+      markCurrent();
+    } catch (e) {
+      list.innerHTML = "";
+      empty.hidden = false;
+      empty.textContent = e.status === 404 || e.status === 409
+        ? "No entries yet. Your first saved entry will appear here."
+        : e.message;
+    }
+  }
+
+  /* ---------- Connection ---------- */
+  function fillConn() { ["owner", "repo", "branch", "author", "token"].forEach(k => { $(k).value = cfg[k] || ""; }); }
+  async function connect(quiet) {
+    const msg = $("connMsg");
+    setMsg(msg, "Connecting…");
+    setStatus("Connecting…");
+    try {
+      const repo = await (await api(repoBase())).json();
+      if (repo.permissions && repo.permissions.push === false) {
+        throw new Error("This token can read the repository but can’t write to it. Give it Contents: Read and write access.");
+      }
+      try { await api(`${repoBase()}/branches/${encodeURIComponent(cfg.branch)}`); }
+      catch (e) {
+        if (e.status === 404) throw new Error(`The branch “${cfg.branch}” doesn’t exist in ${cfg.owner}/${cfg.repo}. If the repository is empty, add a README on GitHub first; otherwise check the branch name (often “main”).`);
+        throw e;
+      }
+      connected = true;
+      setStatus(`Connected to ${cfg.owner}/${cfg.repo}`, "ok");
+      setMsg(msg, "Connected.", "ok");
+      $("connDetails").open = false;
+      await loadEntries();
+    } catch (e) {
+      connected = false;
+      setStatus("Not connected", "warn");
+      setMsg(msg, e.message, "warn");
+      $("connDetails").open = true;
+      if (!quiet) $("token").focus();
+    }
+  }
+
+  /* ---------- Save entry ---------- */
+  async function commitEntry() {
+    if (busy) return;
+    const msg = $("commitMsg");
+    if (!connected) {
+      setMsg(msg, "Connect to your notebook repository first.", "warn");
+      $("connDetails").open = true; $("owner").focus();
+      return;
+    }
+    if (!cfg.author.trim()) {
+      setMsg(msg, "Add your name in the connection panel so the entry is signed.", "warn");
+      $("connDetails").open = true; $("author").focus();
+      return;
+    }
+    const v = values();
+    document.querySelectorAll(".field.missing").forEach(el => el.classList.remove("missing"));
+    const missing = FIELDS.filter(f => f.req && !(v[f.id] || "").trim());
+    if (missing.length) {
+      showTab(false);
+      missing.forEach(f => $(`f-${f.id}`).classList.add("missing"));
+      setMsg(msg, `Fill in before saving: ${missing.map(f => f.label.toLowerCase()).join(", ")}.`, "warn");
+      $(missing[0].id).focus();
+      return;
+    }
+    busy = true;
+    $("commitBtn").disabled = true; $("discardBtn").disabled = true;
+    let uploaded = 0;
+    try {
+      setMsg(msg, "Checking the notebook…");
+      const dir = `entries/${v.date.slice(0, 4)}`;
+      const base = `${v.date}-${slugify(v.title)}`;
+      let name = base, n = 2;
+      while (await exists(`${dir}/${name}.md`)) name = `${base}-${n++}`;
+      const assetBase = `assets/${name}`;
+      for (const a of attachments) {
+        setMsg(msg, `Uploading ${a.name} (${uploaded + 1} of ${attachments.length})…`);
+        const b64 = bytesToB64(new Uint8Array(await a.file.arrayBuffer()));
+        await putFile(`${dir}/${assetBase}/${a.name}`, b64, `Data for “${v.title.trim()}”: ${a.name}`);
+        uploaded++;
+      }
+      setMsg(msg, "Saving entry…");
+      const path = `${dir}/${name}.md`;
+      await putFile(path, utf8ToB64(buildMarkdown(v, assetBase)), `Notebook entry: ${v.title.trim()} (${v.date})`);
+      clearForm();
+      setMsg(msg, "Your text is kept as a draft in this browser until you save.");
+      await loadEntries();
+      await viewEntry(path);
+      setMsg($("viewMsg"), "Saved to notebook.", "ok");
+    } catch (e) {
+      const partial = uploaded ? ` ${uploaded} data file${uploaded > 1 ? "s were" : " was"} already uploaded; saving again will upload fresh copies under a new name.` : "";
+      setMsg(msg, e.message + partial + " Your draft is still here.", "warn");
+    } finally {
+      busy = false;
+      $("commitBtn").disabled = false; $("discardBtn").disabled = false;
+    }
+  }
+
+  /* ---------- Addendum ---------- */
+  async function appendAddendum() {
+    if (busy || !currentView) return;
+    const text = $("addText").value.trim();
+    const msg = $("addMsg");
+    if (!text) { setMsg(msg, "Write the addendum first.", "warn"); $("addText").focus(); return; }
+    busy = true; $("addBtn").disabled = true;
+    try {
+      setMsg(msg, "Saving addendum…");
+      const { text: current, sha } = await getText(currentView.path);
+      const who = cfg.author.trim() ? ` (${cfg.author.trim()})` : "";
+      const updated = current.replace(/\s*$/, "") + `\n\n---\n\n## Addendum, ${stamp()}${who}\n\n${text}\n`;
+      const res = await putFile(currentView.path, utf8ToB64(updated), `Addendum: ${currentView.path.split("/").pop()}`, sha);
+      currentView.sha = res.content && res.content.sha;
+      currentView.text = updated;
+      renderEntry(currentView.path, updated);
+      $("addText").value = "";
+      setMsg(msg, "Addendum saved.", "ok");
+    } catch (e) {
+      setMsg(msg, e.message, "warn");
+    } finally {
+      busy = false; $("addBtn").disabled = false;
+    }
+  }
+
+  /* ---------- Wire up ---------- */
+  buildForm();
+  fillConn();
+  restoreDraft();
+
+  $("entryForm").addEventListener("input", (e) => {
+    if (e.target.type !== "file") saveDraft();
+    const f = e.target.closest(".field");
+    if (f && e.target.value.trim()) f.classList.remove("missing");
+  });
+  $("entryForm").addEventListener("submit", (e) => e.preventDefault());
+  $("files").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+  $("tabWrite").onclick = () => showTab(false);
+  $("tabPreview").onclick = () => showTab(true);
+  $("commitBtn").onclick = commitEntry;
+  $("discardBtn").onclick = () => {
+    if (confirm("Discard this draft? All text and attached files will be cleared.")) {
+      clearForm(); showTab(false);
+      setMsg($("commitMsg"), "Draft discarded.");
+    }
+  };
+  $("newBtn").onclick = () => { showEditor(); showTab(false); $("title").focus(); };
+  $("backBtn").onclick = () => { showEditor(); showTab(false); };
+  $("addBtn").onclick = appendAddendum;
+
+  $("connForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    cfg = {
+      owner: $("owner").value.trim(),
+      repo: $("repo").value.trim(),
+      branch: $("branch").value.trim() || "main",
+      author: $("author").value.trim(),
+      token: $("token").value.trim()
+    };
+    store.set(CFG_KEY, cfg);
+    connect(false);
+  });
+  $("forgetBtn").onclick = () => {
+    cfg.token = ""; $("token").value = "";
+    store.set(CFG_KEY, cfg);
+    connected = false;
+    setStatus("Not connected");
+    setMsg($("connMsg"), "Token removed from this browser.", "ok");
+    $("entryList").innerHTML = "";
+    $("entriesEmpty").hidden = false;
+    $("entriesEmpty").textContent = "Connect to see your saved entries.";
+    showEditor();
+  };
+
+  if (cfg.owner && cfg.repo && cfg.token) connect(true);
+})();
+</script>
+</body>
+</html>
