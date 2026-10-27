@@ -1,9 +1,10 @@
 /**
  * Lab notebook — Google Apps Script server.
  *
- * Students don't sign in. They type their school email, name and project title at the
- * top of the page; entries are filed under entries/<email name>/<project>/ and listed
- * again whenever they enter the same email. This script (running as the instructor)
+ * Students don't sign in. They type their school email at the top of the page; entries
+ * are filed under entries/<email name>/<year>/ and listed again whenever they enter the
+ * same email. Their name, project and experiment title live inside each entry, so a
+ * typo there never changes where anything is filed. This script (running as the instructor)
  * writes to a private GitHub repository with the instructor's token, which students
  * never see.
  *
@@ -12,7 +13,7 @@
  *   GITHUB_OWNER    account or organization that owns the repo
  *   GITHUB_REPO     repository name
  *   GITHUB_BRANCH   optional, default "main"
- *   ALLOWED_DOMAIN  optional, default "umb.edu"
+ *   ALLOWED_DOMAIN  optional, default "northeastern.edu"
  *   ROSTER          optional comma-separated student emails; if set, only these work
  *                   (catches typos that would otherwise create a stray folder)
  */
@@ -20,9 +21,9 @@
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 25 * 1024 * 1024;
 const MAX_FILES = 20;
-const TEXT_KEYS = ["title", "date", "collab", "question", "hypothesis", "prediction",
+const TEXT_KEYS = ["author", "project", "title", "date", "collab", "question", "hypothesis", "prediction",
   "materials", "procedure", "deviations", "observations", "interpretation", "next"];
-const REQUIRED = { title: "experiment title", date: "date performed", hypothesis: "hypothesis",
+const REQUIRED = { author: "your name", title: "experiment title", date: "date performed", hypothesis: "hypothesis",
   procedure: "procedure", observations: "observations and results" };
 
 /* ---------------- Web app entry point ---------------- */
@@ -49,37 +50,24 @@ function cfg_() {
     owner: p.GITHUB_OWNER.trim(),
     repo: p.GITHUB_REPO.trim(),
     branch: (p.GITHUB_BRANCH || "main").trim(),
-    domain: (p.ALLOWED_DOMAIN || "umb.edu").trim().toLowerCase(),
+    domain: (p.ALLOWED_DOMAIN || "northeastern.edu").trim().toLowerCase(),
     roster: list_(p.ROSTER)
   };
 }
 
-// Turns what the student typed at the top of the page into a folder and signature.
+// The email is the only thing that decides where entries are filed.
 function ident_(info) {
   const c = cfg_();
-  info = info || {};
-  const email = String(info.email || "").trim().toLowerCase();
+  const email = String((info && info.email) || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter your full school email address.");
   if (!email.endsWith("@" + c.domain)) throw new Error(`Use your @${c.domain} email address.`);
   if (c.roster.length && c.roster.indexOf(email) === -1) {
     throw new Error(`${email} isn’t on this course’s list. Check the spelling, or ask your instructor to add it.`);
   }
-  const clean = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 100);
-  const projectTitle = clean(info.project);
-  return {
-    email: email,
-    folder: email.split("@")[0].replace(/[^a-z0-9._-]+/g, "-"),
-    name: clean(info.name),
-    projectTitle: projectTitle,
-    project: projectTitle ? slugify_(projectTitle) : "",
-    cfg: c
-  };
+  return { email: email, folder: email.split("@")[0].replace(/[^a-z0-9._-]+/g, "-"), cfg: c };
 }
 
-function needSignature_(u) {
-  if (!u.name) throw new Error("Enter your name at the top, so the entry is signed.");
-}
-
+const cleanLine_ = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 100);
 /* ---------------- GitHub ---------------- */
 
 function friendly_(code, m) {
@@ -125,12 +113,76 @@ function exists_(c, p) {
   catch (e) { if (e.status === 404) return false; throw e; }
 }
 
-function put_(u, p, b64, message, sha) {
+// Confirms the repository and branch are reachable before reading or writing, so a
+// setup problem produces a specific message instead of a generic "not found".
+// A passing check is remembered for 10 minutes to keep saves fast.
+function repoCheck_(c) {
+  const cache = CacheService.getScriptCache();
+  const key = `repo-ok:${c.owner}/${c.repo}@${c.branch}`;
+  if (cache.get(key)) return;
+  const problem = setupProblem_(c);
+  if (problem) throw new Error(problem + " Tell your instructor.");
+  cache.put(key, "1", 600);
+}
+
+function setupProblem_(c) {
+  let repo;
+  try {
+    repo = JSON.parse(gh_(c, "get", repoBase_(c)).getContentText());
+  } catch (e) {
+    if (e.status === 404) {
+      return `The notebook can’t reach the GitHub repository “${c.owner}/${c.repo}”. ` +
+        "Either GITHUB_OWNER or GITHUB_REPO is misspelled, or the token wasn’t given access to this repository.";
+    }
+    return e.message;
+  }
+  if (repo.permissions && repo.permissions.push === false) {
+    return `The token can read “${c.owner}/${c.repo}” but can’t write to it. It needs Contents: Read and write.`;
+  }
+  try {
+    gh_(c, "get", `${repoBase_(c)}/branches/${encodeURIComponent(c.branch)}`);
+  } catch (e) {
+    if (e.status === 404) {
+      return repo.size === 0
+        ? `The repository “${c.owner}/${c.repo}” is empty. Add a README on GitHub so the “${c.branch}” branch exists.`
+        : `The repository has no branch named “${c.branch}”` +
+          (repo.default_branch ? ` (its main branch is “${repo.default_branch}”; set GITHUB_BRANCH to that).` : ".");
+    }
+    return e.message;
+  }
+  return "";
+}
+
+/**
+ * Run this from the Apps Script editor (select checkSetup, then Run) to test the
+ * setup. The result appears in the execution log.
+ */
+function checkSetup() {
+  const lines = [];
+  let c;
+  try { c = cfg_(); } catch (e) { Logger.log(e.message); return e.message; }
+  lines.push(`Repository: ${c.owner}/${c.repo}, branch: ${c.branch}, email domain: @${c.domain}`);
+  lines.push(c.roster.length ? `Course list: ${c.roster.length} emails` : "Course list: not set (any address at the domain works)");
+  try {
+    const who = JSON.parse(gh_(c, "get", "/user").getContentText()).login;
+    lines.push(`Token: valid, belongs to GitHub user “${who}”`);
+  } catch (e) {
+    lines.push(`Token: ${e.message}`);
+  }
+  const problem = setupProblem_(c);
+  lines.push(problem ? `Problem: ${problem}` : "Repository and branch: reachable, and the token can write. Setup looks good.");
+  CacheService.getScriptCache().remove(`repo-ok:${c.owner}/${c.repo}@${c.branch}`);
+  const out = lines.join("\n");
+  Logger.log(out);
+  return out;
+}
+
+function put_(u, p, b64, message, sha, authorName) {
   const body = {
     message: message,
     content: b64,
     branch: u.cfg.branch,
-    author: { name: u.name || u.folder, email: u.email }
+    author: { name: authorName || u.folder, email: u.email }
   };
   if (sha) body.sha = sha;
   return JSON.parse(gh_(u.cfg, "put", contents_(u.cfg, p), body).getContentText());
@@ -188,14 +240,14 @@ function buildMarkdown_(f, u, assetBase, fileNames, recordedIso) {
   L.push("---");
   yaml("title", f.title);
   L.push(`date: ${f.date}`);
-  yaml("author", u.name);
+  yaml("author", cleanLine_(f.author));
   yaml("student", u.email);
-  yaml("project", u.projectTitle);
+  yaml("project", cleanLine_(f.project));
   L.push(`recorded: ${recordedIso}`, "---", "");
   L.push(`# ${f.title.trim() || "Untitled entry"}`, "");
   L.push(`- **Date performed:** ${f.date}`);
-  L.push(`- **Recorded by:** ${(u.name || u.folder).trim()} (${u.email})`);
-  if (u.projectTitle) L.push(`- **Project:** ${u.projectTitle}`);
+  L.push(`- **Recorded by:** ${(cleanLine_(f.author) || u.folder)} (${u.email})`);
+  if (cleanLine_(f.project)) L.push(`- **Project:** ${cleanLine_(f.project)}`);
   if (f.collab.trim()) L.push(`- **Worked with:** ${f.collab.trim()}`);
   L.push("");
   const sec = (h, text, fallback) => {
@@ -231,18 +283,48 @@ function config() {
 // Every entry filed under this email, newest first.
 function listEntries(info) {
   const u = ident_(info), c = u.cfg;
-  let tree;
-  try {
-    tree = JSON.parse(gh_(c, "get", `${repoBase_(c)}/git/trees/${encodeURIComponent(c.branch)}?recursive=1`).getContentText()).tree || [];
-  } catch (e) {
-    if (e.status === 404 || e.status === 409) return [];
-    throw e;
-  }
+  repoCheck_(c);
+  const tree = JSON.parse(gh_(c, "get", `${repoBase_(c)}/git/trees/${encodeURIComponent(c.branch)}?recursive=1`).getContentText()).tree || [];
   const prefix = `entries/${u.folder}/`;
-  return tree
+  const paths = tree
     .filter(t => t.type === "blob" && t.path.indexOf(prefix) === 0 && /\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
-    .map(t => t.path)
-    .sort((a, b) => b.split("/").pop().localeCompare(a.split("/").pop()));
+    .map(t => t.path);
+  if (!paths.length) return [];
+
+  // File names hold only the date, so read each entry's title and project from its
+  // front matter. fetchAll runs the requests in parallel.
+  const reqs = paths.map(p => ({
+    url: "https://api.github.com" + contents_(c, p) + ref_(c),
+    method: "get",
+    muteHttpExceptions: true,
+    headers: { Authorization: "Bearer " + c.token, Accept: "application/vnd.github.raw+json", "X-GitHub-Api-Version": "2022-11-28" }
+  }));
+  const responses = UrlFetchApp.fetchAll(reqs);
+  return paths.map((p, i) => {
+    const meta = responses[i].getResponseCode() < 300 ? frontMatter_(responses[i].getContentText("UTF-8")) : {};
+    const file = p.split("/").pop().replace(/\.md$/i, "");
+    return {
+      path: p,
+      title: meta.title || file,
+      project: meta.project || "",
+      date: meta.date || (file.match(/^\d{4}-\d{2}-\d{2}/) || [""])[0],
+      recorded: meta.recorded || ""
+    };
+  }).sort((a, b) => (b.date + b.recorded).localeCompare(a.date + a.recorded));
+}
+
+function frontMatter_(text) {
+  const m = String(text).match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const out = {};
+  if (!m) return out;
+  m[1].split(/\r?\n/).forEach(line => {
+    const kv = line.match(/^([A-Za-z_]+):\s*(.*)$/);
+    if (!kv) return;
+    let v = kv[2].trim();
+    if (/^".*"$/.test(v)) { try { v = JSON.parse(v); } catch (e) {} }
+    out[kv[1]] = v;
+  });
+  return out;
 }
 
 function getEntry(info, path) {
@@ -268,8 +350,7 @@ function previewEntry(info, fields, fileNames) {
 
 function saveEntry(info, payload) {
   const u = ident_(info);
-  needSignature_(u);
-  if (!u.project) throw new Error("Enter a project title at the top. Entries are filed under it.");
+  repoCheck_(u.cfg);
   const f = cleanFields_(payload && payload.fields);
   const missing = Object.keys(REQUIRED).filter(k => !f[k].trim());
   if (missing.length) throw new Error("Fill in before saving: " + missing.map(k => REQUIRED[k]).join(", ") + ".");
@@ -285,30 +366,34 @@ function saveEntry(info, payload) {
   if (total > MAX_ENTRY_BYTES) throw new Error("The attached files add up to more than 25 MB. Split them across entries or store some elsewhere.");
   const names = uniqueNames_(files.map(x => x.name));
 
-  const dir = `entries/${u.folder}/${u.project}`;
-  const base = `${f.date}-${slugify_(f.title)}`;
+  // Filed by email and date only: entries/<email name>/<year>/<date>.md, then <date>-2.md, ...
+  const author = cleanLine_(f.author);
+  const dir = `entries/${u.folder}/${f.date.slice(0, 4)}`;
+  const base = f.date;
   let name = base, i = 2;
   while (exists_(u.cfg, `${dir}/${name}.md`)) name = `${base}-${i++}`;
   const assetBase = `assets/${name}`;
 
   files.forEach((x, k) => {
-    put_(u, `${dir}/${assetBase}/${names[k]}`, String(x.b64), `Data for “${f.title.trim()}”: ${names[k]}`);
+    put_(u, `${dir}/${assetBase}/${names[k]}`, String(x.b64), `Data for “${f.title.trim()}”: ${names[k]}`, null, author);
   });
   const path = `${dir}/${name}.md`;
   const md = buildMarkdown_(f, u, assetBase, names, new Date().toISOString());
-  put_(u, path, Utilities.base64Encode(md, Utilities.Charset.UTF_8), `Notebook entry: ${f.title.trim()} (${f.date})`);
+  put_(u, path, Utilities.base64Encode(md, Utilities.Charset.UTF_8), `Notebook entry: ${f.title.trim()} (${f.date})`, null, author);
   return path;
 }
 
-function appendAddendum(info, path, text) {
+function appendAddendum(info, path, text, name) {
   const u = ident_(info);
-  needSignature_(u);
+  const author = cleanLine_(name);
+  if (!author) throw new Error("Enter your name, so the addendum is signed.");
   path = checkPath_(u, path);
+  repoCheck_(u.cfg);
   const add = String(text || "").trim().slice(0, 50000);
   if (!add) throw new Error("Write the addendum first.");
   const cur = readText_(u.cfg, path);
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
-  const updated = cur.text.replace(/\s+$/, "") + `\n\n---\n\n## Addendum, ${stamp} (${u.name})\n\n${add}\n`;
-  put_(u, path, Utilities.base64Encode(updated, Utilities.Charset.UTF_8), `Addendum: ${path.split("/").pop()}`, cur.sha);
+  const updated = cur.text.replace(/\s+$/, "") + `\n\n---\n\n## Addendum, ${stamp} (${author})\n\n${add}\n`;
+  put_(u, path, Utilities.base64Encode(updated, Utilities.Charset.UTF_8), `Addendum: ${path.split("/").pop()}`, cur.sha, author);
   return updated;
 }

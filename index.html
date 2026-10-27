@@ -197,11 +197,12 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 .span2 { grid-column: 1 / -1; }
 .idbar {
   max-width: 78rem; margin: 0 auto; padding: 1.25rem 1.5rem 0;
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: .75rem 1rem; align-items: end;
+  display: grid; grid-template-columns: minmax(0, 26rem) auto; justify-content: start; gap: .75rem 1rem; align-items: end;
 }
 .idbar label { display: block; font-weight: 700; font-size: .9375rem; margin-bottom: .25rem; }
 .idbar .msg { grid-column: 1 / -1; }
-@media (max-width: 760px) { .idbar { grid-template-columns: 1fr; padding: 1rem 1rem 0; } }
+@media (max-width: 560px) { .idbar { grid-template-columns: 1fr; padding: 1rem 1rem 0; } }
+.addname { max-width: 20rem; margin-bottom: .75rem; }
 .intro { max-width: 78rem; margin: 0 auto; padding: 1.5rem; color: var(--muted); }
 .intro p { max-width: 40rem; margin: 0 0 .5rem; }
 #entryList .group { font-size: .9375rem; font-weight: 700; color: var(--muted); margin: 1rem 0 .125rem; padding: 0 .25rem; }
@@ -219,24 +220,15 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 <form id="idForm" class="idbar" novalidate>
   <div>
     <label for="email">School email</label>
-    <input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="name@umb.edu">
-  </div>
-  <div>
-    <label for="author">Your name</label>
-    <input id="author" autocomplete="name">
-  </div>
-  <div>
-    <label for="project">Project title</label>
-    <input id="project" list="projectList" autocomplete="off">
-    <datalist id="projectList"></datalist>
+    <input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="name@northeastern.edu">
   </div>
   <button class="primary" type="submit" id="openBtn">Open my notebook</button>
   <p id="idMsg" class="msg" role="status"></p>
 </form>
 
 <div id="intro" class="intro">
-  <p>Enter your school email, your name and the project you’re working on, then open your notebook.</p>
-  <p>Your entries are filed under your email and project. Enter the same email any time to see them again.</p>
+  <p>Enter your school email to open your notebook.</p>
+  <p>Your entries are filed under your email. Enter the same email any time to see them again.</p>
 </div>
 
 <div class="layout" id="app" hidden>
@@ -275,6 +267,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       <div class="addendum">
         <h2>Add an addendum</h2>
         <p class="hint">Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and every earlier version is kept.</p>
+        <div class="addname">
+          <label for="addName" class="hint">Your name</label>
+          <input id="addName" autocomplete="name">
+        </div>
         <label for="addText" class="hint">Addendum text</label>
         <textarea id="addText" rows="4"></textarea>
         <div class="row">
@@ -305,6 +301,8 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   /* ---------- Entry template (the server builds the Markdown from these keys) ---------- */
   const SECTIONS = ["Entry", "Question and hypothesis", "Materials", "Procedure", "Results", "Interpretation"];
   const FIELDS = [
+    { sec: 0, id: "author", label: "Your name", type: "text", req: true, autocomplete: "name" },
+    { sec: 0, id: "project", label: "Project title", type: "text", list: "projectList", placeholder: "Optional, e.g. a thesis aim or course module" },
     { sec: 0, id: "title", label: "Experiment title", type: "text", req: true, wide: true },
     { sec: 0, id: "date", label: "Date performed", type: "date", req: true },
     { sec: 0, id: "collab", label: "Worked with", type: "text", placeholder: "Lab partners or collaborators" },
@@ -322,7 +320,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   const TEXT_FIELDS = FIELDS.filter(f => f.type !== "file");
   const ID_KEY = "eln-identity";
 
-  let conf = { domain: "umb.edu", maxFileBytes: 10485760, maxEntryBytes: 26214400 };
+  let conf = { domain: "northeastern.edu", maxFileBytes: 10485760, maxEntryBytes: 26214400 };
   let activeEmail = "";       // the notebook currently open
   let allPaths = [];
   let attachments = [];
@@ -333,14 +331,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 
   /* ---------- Utilities ---------- */
   const todayLocal = () => { const t = new Date(); return new Date(t - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
-  const slugify = (s) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "entry";
-  const humanize = (slug) => { const w = slug.replace(/-/g, " ").trim(); return w.charAt(0).toUpperCase() + w.slice(1); };
   const safeName = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "file";
   const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
   const esc = (s) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const projectOf = (p) => { const m = p.match(/^entries\/[^/]+\/([^/]+)\/[^/]+\.md$/i); return m ? m[1] : ""; };
   const fileToB64 = (file) => new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(String(r.result).split(",")[1] || "");
@@ -350,7 +344,17 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
 
   // What the student typed at the top. The email is fixed to the open notebook.
-  const ident = () => ({ email: activeEmail, name: $("author").value.trim(), project: $("project").value.trim() });
+  const ident = () => ({ email: activeEmail });
+  // Name and project are prefilled from the last entry saved with this email.
+  const profileKey = () => `eln-profile:${activeEmail}`;
+  function rememberProfile() {
+    if (activeEmail) store.set(profileKey(), { author: $("author").value.trim(), project: $("project").value.trim() });
+  }
+  function prefillProfile() {
+    const p = store.get(profileKey()) || {};
+    if (!$("author").value) $("author").value = p.author || "";
+    if (!$("project").value) $("project").value = p.project || "";
+  }
   const draftKey = () => `eln-draft:${activeEmail}`;
 
   /* ---------- Form ---------- */
@@ -370,7 +374,8 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
         d.className = "field" + (f.wide ? " span2" : ""); d.id = `f-${f.id}`;
         const hintId = f.hint ? `${f.id}-hint` : "";
         const desc = hintId ? `aria-describedby="${hintId}"` : "";
-        const ph = f.placeholder ? `placeholder="${esc(f.placeholder)}"` : "";
+        const ph = (f.placeholder ? `placeholder="${esc(f.placeholder)}"` : "") +
+          (f.list ? ` list="${f.list}" autocomplete="off"` : f.autocomplete ? ` autocomplete="${f.autocomplete}"` : "");
         let control;
         if (f.type === "file") control = `<input id="${f.id}" type="file" multiple ${desc}><ul class="files" id="fileList"></ul>`;
         else if (f.type) control = `<input id="${f.id}" type="${f.type}" ${f.req ? "required" : ""} ${desc} ${ph}>`;
@@ -383,6 +388,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       form.appendChild(sec);
     });
     $("date").value = todayLocal();
+    const dl = document.createElement("datalist");
+    dl.id = "projectList";
+    form.appendChild(dl);
+    $("project").addEventListener("change", renderList);
 
     form.addEventListener("input", (e) => {
       if (e.target.type !== "file") saveDraft();
@@ -398,8 +407,8 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     TEXT_FIELDS.forEach(f => { $(f.id).value = ""; });
     $("date").value = todayLocal();
     const d = store.get(draftKey());
-    if (!d) return;
-    TEXT_FIELDS.forEach(f => { if (typeof d[f.id] === "string" && d[f.id] !== "") $(f.id).value = d[f.id]; });
+    if (d) TEXT_FIELDS.forEach(f => { if (typeof d[f.id] === "string" && d[f.id] !== "") $(f.id).value = d[f.id]; });
+    prefillProfile();
   }
   function clearForm() {
     TEXT_FIELDS.forEach(f => { $(f.id).value = ""; });
@@ -409,6 +418,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     renderFiles();
     document.querySelectorAll(".field.missing").forEach(el => el.classList.remove("missing"));
     store.del(draftKey());
+    prefillProfile();
   }
 
   /* ---------- Attachments ---------- */
@@ -489,6 +499,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     $("editor").hidden = true;
     $("viewer").hidden = false;
     setMsg($("viewMsg"), ""); setMsg($("addMsg"), "");
+    if (!$("addName").value) $("addName").value = (store.get(profileKey()) || {}).author || $("author").value.trim();
     $("viewBody").innerHTML = '<p class="hint">Opening entry…</p>';
     markCurrent();
     try {
@@ -557,29 +568,40 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     empty.hidden = allPaths.length > 0;
     empty.textContent = "No entries yet. Your first saved entry will appear here.";
 
-    // Current project first, then the rest alphabetically.
-    const current = slugify($("project").value || "");
-    const projects = [...new Set(allPaths.map(projectOf))].filter(Boolean)
-      .sort((a, b) => (b === current) - (a === current) || a.localeCompare(b));
+    // Group by the project written in each entry; the project in the form comes first.
+    const key = (s) => (s || "").trim().toLowerCase();
+    const current = key($("project") ? $("project").value : "");
+    const groups = new Map();
+    allPaths.forEach(e => {
+      const k = key(e.project);
+      if (!groups.has(k)) groups.set(k, { label: e.project.trim() || "No project", items: [] });
+      groups.get(k).items.push(e);
+    });
+    const order = [...groups.keys()].sort((a, b) =>
+      (b === current) - (a === current) || (a === "") - (b === "") || a.localeCompare(b));
 
     const dl = $("projectList");
-    dl.innerHTML = "";
-    projects.forEach(p => { const o = document.createElement("option"); o.value = humanize(p); dl.appendChild(o); });
+    if (dl) {
+      dl.innerHTML = "";
+      order.filter(Boolean).forEach(k => { const o = document.createElement("option"); o.value = groups.get(k).label; dl.appendChild(o); });
+    }
 
-    projects.forEach(p => {
-      const head = document.createElement("li");
-      head.className = "group" + (p === current ? " current" : "");
-      head.textContent = humanize(p);
-      list.appendChild(head);
-      allPaths.filter(x => projectOf(x) === p).forEach(path => {
-        const file = path.split("/").pop().replace(/\.md$/i, "");
-        const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
+    const showHeads = order.length > 1 || order[0] !== "";
+    order.forEach(k => {
+      const g = groups.get(k);
+      if (showHeads) {
+        const head = document.createElement("li");
+        head.className = "group" + (k && k === current ? " current" : "");
+        head.textContent = g.label;
+        list.appendChild(head);
+      }
+      g.items.forEach(e => {
         const li = document.createElement("li");
         const b = document.createElement("button");
-        b.type = "button"; b.dataset.path = path;
-        b.textContent = humanize(m ? m[2] || "untitled" : file);
-        if (m) { const d = document.createElement("span"); d.className = "d"; d.textContent = m[1]; b.prepend(d); }
-        b.onclick = () => viewEntry(path);
+        b.type = "button"; b.dataset.path = e.path;
+        b.textContent = e.title || "Untitled";
+        if (e.date) { const d = document.createElement("span"); d.className = "d"; d.textContent = e.date; b.prepend(d); }
+        b.onclick = () => viewEntry(e.path);
         li.appendChild(b);
         list.appendChild(li);
       });
@@ -588,20 +610,16 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   }
 
   /* ---------- Opening a notebook ---------- */
-  function checkTopBar(needAll) {
+  function checkEmail() {
     const email = $("email").value.trim().toLowerCase();
-    const name = $("author").value.trim();
-    const project = $("project").value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { field: "email", msg: "Enter your full school email address." };
-    if (!email.endsWith("@" + conf.domain)) return { field: "email", msg: `Use your @${conf.domain} email address.` };
-    if (needAll && !name) return { field: "author", msg: "Enter your name, so your entries are signed." };
-    if (needAll && !project) return { field: "project", msg: "Enter a project title. Your entries are filed under it." };
-    return null;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "Enter your full school email address.";
+    if (!email.endsWith("@" + conf.domain)) return `Use your @${conf.domain} email address.`;
+    return "";
   }
 
   async function openNotebook() {
-    const problem = checkTopBar(true);
-    if (problem) { setMsg($("idMsg"), problem.msg, "warn"); $(problem.field).focus(); return; }
+    const problem = checkEmail();
+    if (problem) { setMsg($("idMsg"), problem, "warn"); $("email").focus(); return; }
     const email = $("email").value.trim().toLowerCase();
     $("email").value = email;
     $("openBtn").disabled = true;
@@ -613,9 +631,14 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       $("openBtn").disabled = false;
       return;
     }
-    if (activeEmail && activeEmail !== email) clearForm();
+    if (activeEmail && activeEmail !== email) {
+      attachments.forEach(a => URL.revokeObjectURL(a.url));
+      attachments = [];
+      if (formBuilt) renderFiles();
+      $("addName").value = "";
+    }
     activeEmail = email;
-    store.set(ID_KEY, { email, name: $("author").value.trim(), project: $("project").value.trim() });
+    store.set(ID_KEY, { email });
     $("openBtn").disabled = false;
     $("openBtn").textContent = "Switch notebook";
     setMsg($("idMsg"), "");
@@ -635,9 +658,6 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       setMsg(msgEl, "The email at the top has changed. Press “Switch notebook” first, or change it back.", "warn");
       return false;
     }
-    const problem = checkTopBar(true);
-    if (problem) { setMsg(msgEl, problem.msg, "warn"); $(problem.field).focus(); return false; }
-    store.set(ID_KEY, ident());
     return true;
   }
 
@@ -665,11 +685,13 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       setMsg(msg, attachments.length ? "Uploading entry and data files…" : "Saving entry…");
       const files = await Promise.all(attachments.map(async a => ({ name: a.name, b64: await fileToB64(a.file) })));
       const path = await run("saveEntry", ident(), { fields: v, files });
+      rememberProfile();
+      const savedProject = v.project.trim();
       clearForm();
       setMsg(msg, "Your text is kept as a draft in this browser until you save.");
       await loadEntries();
       await viewEntry(path);
-      setMsg($("viewMsg"), `Saved to notebook under “${$("project").value.trim()}”.`, "ok");
+      setMsg($("viewMsg"), savedProject ? `Saved to notebook under “${savedProject}”.` : "Saved to notebook.", "ok");
     } catch (e) {
       setMsg(msg, e.message + " Your draft is still here.", "warn");
     } finally {
@@ -684,10 +706,12 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     const text = $("addText").value.trim();
     if (!text) { setMsg(msg, "Write the addendum first.", "warn"); $("addText").focus(); return; }
     if (!topBarReady(msg)) return;
+    const name = $("addName").value.trim();
+    if (!name) { setMsg(msg, "Enter your name, so the addendum is signed.", "warn"); $("addName").focus(); return; }
     busy = true; $("addBtn").disabled = true;
     try {
       setMsg(msg, "Saving…");
-      const updated = await run("appendAddendum", ident(), currentView.path, text);
+      const updated = await run("appendAddendum", ident(), currentView.path, text, name);
       renderEntry(currentView.path, updated);
       $("addText").value = "";
       setMsg(msg, "Saved.", "ok");
@@ -700,8 +724,6 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 
   /* ---------- Start ---------- */
   $("idForm").addEventListener("submit", (e) => { e.preventDefault(); openNotebook(); });
-  $("project").addEventListener("change", () => { if (activeEmail) { store.set(ID_KEY, ident()); renderList(); } });
-  $("author").addEventListener("change", () => { if (activeEmail) store.set(ID_KEY, ident()); });
   $("tabWrite").onclick = () => showTab(false);
   $("tabPreview").onclick = () => showTab(true);
   $("commitBtn").onclick = commitEntry;
@@ -727,9 +749,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     const saved = store.get(ID_KEY);
     if (saved && saved.email) {
       $("email").value = saved.email;
-      $("author").value = saved.name || "";
-      $("project").value = saved.project || "";
-      if (saved.name && saved.project) openNotebook();
+      openNotebook();
     }
   })();
 })();
