@@ -1,10 +1,11 @@
 /**
  * Lab notebook — Google Apps Script server.
  *
- * Students sign in with their school Google account. This script (running as the
- * instructor) checks who they are and writes their entries to a private GitHub
- * repository with the instructor's token. Students never need a GitHub account
- * and never see the token.
+ * Students don't sign in. They type their school email, name and project title at the
+ * top of the page; entries are filed under entries/<email name>/<project>/ and listed
+ * again whenever they enter the same email. This script (running as the instructor)
+ * writes to a private GitHub repository with the instructor's token, which students
+ * never see.
  *
  * Script properties (Project Settings → Script properties):
  *   GITHUB_TOKEN    fine-grained token, Contents: Read and write on the one notebook repo
@@ -12,14 +13,14 @@
  *   GITHUB_REPO     repository name
  *   GITHUB_BRANCH   optional, default "main"
  *   ALLOWED_DOMAIN  optional, default "umb.edu"
- *   INSTRUCTORS     comma-separated emails that can see every student's entries
- *   ROSTER          optional comma-separated student emails; if set, only these (and instructors) can use it
+ *   ROSTER          optional comma-separated student emails; if set, only these work
+ *                   (catches typos that would otherwise create a stray folder)
  */
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 25 * 1024 * 1024;
 const MAX_FILES = 20;
-const TEXT_KEYS = ["title", "date", "course", "collab", "question", "hypothesis", "prediction",
+const TEXT_KEYS = ["title", "date", "collab", "question", "hypothesis", "prediction",
   "materials", "procedure", "deviations", "observations", "interpretation", "next"];
 const REQUIRED = { title: "experiment title", date: "date performed", hypothesis: "hypothesis",
   procedure: "procedure", observations: "observations and results" };
@@ -49,23 +50,34 @@ function cfg_() {
     repo: p.GITHUB_REPO.trim(),
     branch: (p.GITHUB_BRANCH || "main").trim(),
     domain: (p.ALLOWED_DOMAIN || "umb.edu").trim().toLowerCase(),
-    instructors: list_(p.INSTRUCTORS),
     roster: list_(p.ROSTER)
   };
 }
 
-function user_() {
+// Turns what the student typed at the top of the page into a folder and signature.
+function ident_(info) {
   const c = cfg_();
-  const email = String(Session.getActiveUser().getEmail() || "").toLowerCase();
-  if (!email) throw new Error(`Sign in with your @${c.domain} account to use the notebook.`);
-  if (!email.endsWith("@" + c.domain)) throw new Error(`You’re signed in as ${email}. Switch to your @${c.domain} account.`);
-  const isInstructor = c.instructors.indexOf(email) !== -1;
-  if (c.roster.length && !isInstructor && c.roster.indexOf(email) === -1) {
-    throw new Error(`${email} isn’t on this course’s roster. Ask your instructor to add it.`);
+  info = info || {};
+  const email = String(info.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter your full school email address.");
+  if (!email.endsWith("@" + c.domain)) throw new Error(`Use your @${c.domain} email address.`);
+  if (c.roster.length && c.roster.indexOf(email) === -1) {
+    throw new Error(`${email} isn’t on this course’s list. Check the spelling, or ask your instructor to add it.`);
   }
-  const folder = email.split("@")[0].replace(/[^a-z0-9._-]+/g, "-");
-  const name = PropertiesService.getScriptProperties().getProperty("name:" + email) || "";
-  return { email, folder, isInstructor, name, cfg: c };
+  const clean = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 100);
+  const projectTitle = clean(info.project);
+  return {
+    email: email,
+    folder: email.split("@")[0].replace(/[^a-z0-9._-]+/g, "-"),
+    name: clean(info.name),
+    projectTitle: projectTitle,
+    project: projectTitle ? slugify_(projectTitle) : "",
+    cfg: c
+  };
+}
+
+function needSignature_(u) {
+  if (!u.name) throw new Error("Enter your name at the top, so the entry is signed.");
 }
 
 /* ---------------- GitHub ---------------- */
@@ -132,15 +144,14 @@ function readText_(c, p) {
   return { text: text, sha: j.sha };
 }
 
-/* ---------------- Access rules ---------------- */
+/* ---------------- Paths ---------------- */
 
-function checkPath_(p) {
+function checkPath_(u, p) {
   p = String(p || "");
   if (!/^entries\//.test(p) || p.split("/").some(s => s === ".." || s === "")) throw new Error("That isn’t a notebook file.");
+  if (p.indexOf(`entries/${u.folder}/`) !== 0) throw new Error("That entry is in a different notebook.");
   return p;
 }
-function ownsPath_(u, p) { return p.indexOf(`entries/${u.folder}/`) === 0; }
-function canRead_(u, p) { return u.isInstructor || ownsPath_(u, p); }
 
 /* ---------------- Markdown ---------------- */
 
@@ -179,12 +190,12 @@ function buildMarkdown_(f, u, assetBase, fileNames, recordedIso) {
   L.push(`date: ${f.date}`);
   yaml("author", u.name);
   yaml("student", u.email);
-  yaml("course", f.course);
+  yaml("project", u.projectTitle);
   L.push(`recorded: ${recordedIso}`, "---", "");
-  L.push(`# ${f.title.trim()}`, "");
+  L.push(`# ${f.title.trim() || "Untitled entry"}`, "");
   L.push(`- **Date performed:** ${f.date}`);
   L.push(`- **Recorded by:** ${(u.name || u.folder).trim()} (${u.email})`);
-  if (f.course.trim()) L.push(`- **Course or project:** ${f.course.trim()}`);
+  if (u.projectTitle) L.push(`- **Project:** ${u.projectTitle}`);
   if (f.collab.trim()) L.push(`- **Worked with:** ${f.collab.trim()}`);
   L.push("");
   const sec = (h, text, fallback) => {
@@ -212,25 +223,14 @@ function buildMarkdown_(f, u, assetBase, fileNames, recordedIso) {
 
 /* ---------------- Functions the page calls ---------------- */
 
-function whoami() {
-  const u = user_();
-  return {
-    email: u.email, folder: u.folder, name: u.name, isInstructor: u.isInstructor,
-    repo: `${u.cfg.owner}/${u.cfg.repo}`, branch: u.cfg.branch,
-    maxFileBytes: MAX_FILE_BYTES, maxEntryBytes: MAX_ENTRY_BYTES
-  };
+function config() {
+  const c = cfg_();
+  return { domain: c.domain, maxFileBytes: MAX_FILE_BYTES, maxEntryBytes: MAX_ENTRY_BYTES };
 }
 
-function setName(name) {
-  const u = user_();
-  const clean = String(name || "").replace(/\s+/g, " ").trim().slice(0, 100);
-  if (!clean) throw new Error("Enter your name.");
-  PropertiesService.getScriptProperties().setProperty("name:" + u.email, clean);
-  return clean;
-}
-
-function listEntries() {
-  const u = user_(), c = u.cfg;
+// Every entry filed under this email, newest first.
+function listEntries(info) {
+  const u = ident_(info), c = u.cfg;
   let tree;
   try {
     tree = JSON.parse(gh_(c, "get", `${repoBase_(c)}/git/trees/${encodeURIComponent(c.branch)}?recursive=1`).getContentText()).tree || [];
@@ -238,24 +238,21 @@ function listEntries() {
     if (e.status === 404 || e.status === 409) return [];
     throw e;
   }
+  const prefix = `entries/${u.folder}/`;
   return tree
-    .filter(t => t.type === "blob" && /^entries\/.+\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
+    .filter(t => t.type === "blob" && t.path.indexOf(prefix) === 0 && /\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
     .map(t => t.path)
-    .filter(p => canRead_(u, p))
     .sort((a, b) => b.split("/").pop().localeCompare(a.split("/").pop()));
 }
 
-function getEntry(path) {
-  const u = user_();
-  path = checkPath_(path);
-  if (!canRead_(u, path)) throw new Error("You can only open your own entries.");
-  return readText_(u.cfg, path).text;
+function getEntry(info, path) {
+  const u = ident_(info);
+  return readText_(u.cfg, checkPath_(u, path)).text;
 }
 
-function getAsset(path) {
-  const u = user_();
-  path = checkPath_(path);
-  if (!canRead_(u, path)) throw new Error("You can only open your own files.");
+function getAsset(info, path) {
+  const u = ident_(info);
+  path = checkPath_(u, path);
   const blob = gh_(u.cfg, "get", contents_(u.cfg, path) + ref_(u.cfg), null, true).getBlob();
   const ext = (path.match(/\.([^.]+)$/) || ["", ""])[1].toLowerCase();
   const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
@@ -263,15 +260,16 @@ function getAsset(path) {
   return { b64: Utilities.base64Encode(blob.getBytes()), mime: types[ext] || "application/octet-stream" };
 }
 
-function previewEntry(fields, fileNames) {
-  const u = user_();
-  const f = cleanFields_(fields);
-  return buildMarkdown_(f, u, "assets/preview", uniqueNames_((fileNames || []).slice(0, MAX_FILES)), new Date().toISOString());
+function previewEntry(info, fields, fileNames) {
+  const u = ident_(info);
+  return buildMarkdown_(cleanFields_(fields), u, "assets/preview",
+    uniqueNames_((fileNames || []).slice(0, MAX_FILES)), new Date().toISOString());
 }
 
-function saveEntry(payload) {
-  const u = user_();
-  if (!u.name) throw new Error("Add your name before saving, so the entry is signed.");
+function saveEntry(info, payload) {
+  const u = ident_(info);
+  needSignature_(u);
+  if (!u.project) throw new Error("Enter a project title at the top. Entries are filed under it.");
   const f = cleanFields_(payload && payload.fields);
   const missing = Object.keys(REQUIRED).filter(k => !f[k].trim());
   if (missing.length) throw new Error("Fill in before saving: " + missing.map(k => REQUIRED[k]).join(", ") + ".");
@@ -287,7 +285,7 @@ function saveEntry(payload) {
   if (total > MAX_ENTRY_BYTES) throw new Error("The attached files add up to more than 25 MB. Split them across entries or store some elsewhere.");
   const names = uniqueNames_(files.map(x => x.name));
 
-  const dir = `entries/${u.folder}/${f.date.slice(0, 4)}`;
+  const dir = `entries/${u.folder}/${u.project}`;
   const base = `${f.date}-${slugify_(f.title)}`;
   let name = base, i = 2;
   while (exists_(u.cfg, `${dir}/${name}.md`)) name = `${base}-${i++}`;
@@ -302,17 +300,15 @@ function saveEntry(payload) {
   return path;
 }
 
-function appendAddendum(path, text) {
-  const u = user_();
-  path = checkPath_(path);
-  if (!ownsPath_(u, path) && !u.isInstructor) throw new Error("You can only add to your own entries.");
-  if (!u.name) throw new Error("Add your name first, so the addendum is signed.");
+function appendAddendum(info, path, text) {
+  const u = ident_(info);
+  needSignature_(u);
+  path = checkPath_(u, path);
   const add = String(text || "").trim().slice(0, 50000);
   if (!add) throw new Error("Write the addendum first.");
   const cur = readText_(u.cfg, path);
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
-  const role = u.isInstructor && !ownsPath_(u, path) ? "Instructor note" : "Addendum";
-  const updated = cur.text.replace(/\s+$/, "") + `\n\n---\n\n## ${role}, ${stamp} (${u.name})\n\n${add}\n`;
-  put_(u, path, Utilities.base64Encode(updated, Utilities.Charset.UTF_8), `${role}: ${path.split("/").pop()}`, cur.sha);
+  const updated = cur.text.replace(/\s+$/, "") + `\n\n---\n\n## Addendum, ${stamp} (${u.name})\n\n${add}\n`;
+  put_(u, path, Utilities.base64Encode(updated, Utilities.Charset.UTF_8), `Addendum: ${path.split("/").pop()}`, cur.sha);
   return updated;
 }

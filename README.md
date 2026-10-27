@@ -1,16 +1,14 @@
-# Lab notebook (school-account version)
+# Lab notebook
 
-Students open one link, sign in with their UMass Boston account, and fill in the notebook form. They never need a GitHub account. A Google Apps Script web app, running under your account, checks who each student is and commits their entries to a private GitHub repository using your token, which students never see.
+Students open one link and type three things at the top of the page: their school email, their name, and the project they're working on. Entries are filed under that email and project, and typing the same email again later brings them all back. No sign-in and no GitHub account are needed.
 
-```
-student’s browser  ──(UMB Google sign-in)──▶  Apps Script web app  ──(your token)──▶  private GitHub repo
-```
+Behind the page, a Google Apps Script web app running under your account writes each entry to a private GitHub repository using your token. Students never see the token or the repository.
 
 ## Files
 
 | File | Where it goes |
 |---|---|
-| `Code.gs` | The server: identity checks, access rules, Markdown, GitHub commits |
+| `Code.gs` | The server: email checks, filing, Markdown, GitHub commits |
 | `Index.html` | The notebook page students see |
 | `appsscript.json` | The project manifest (time zone, permissions, web app settings) |
 
@@ -18,66 +16,70 @@ student’s browser  ──(UMB Google sign-in)──▶  Apps Script web app  �
 
 ```
 entries/
-  jsmith/                 ← the part of the student’s email before @umb.edu
-    2026/
-      2026-10-27-pcr-optimization.md
-      assets/2026-10-27-pcr-optimization/gel-lane-1-6.png
+  jsmith/                       ← the part of the email before @umb.edu
+    pcr-optimization/           ← the project title
+      2026-10-27-annealing-gradient.md
+      2026-10-29-repeat-with-new-primers.md
+      assets/2026-10-27-annealing-gradient/gel-lane-1-6.png
+    frog-skin-isolates/
+      2026-11-03-plating-swabs.md
 ```
 
-Each entry has YAML front matter (title, date, author, student email, course, recorded timestamp). The timestamp comes from Google’s server, not the student’s computer.
+The sidebar lists a student's entries grouped by project, with their current project first. The project box suggests their existing projects as they type, so entries land in the same folder each time. Typing a new project title starts a new folder with the next save.
 
-## Setup (about 20 minutes, once)
+Each entry has YAML front matter (title, date, author, student email, project, recorded timestamp). The timestamp comes from Google's server, not the student's computer. Each commit is authored under the student's name and email.
 
-**1. Make the GitHub repository.** Create a private repository, for example `biot-notebooks`, with a README so the `main` branch exists. Under Settings → Branches, add a rule for `main` that blocks force pushes and deletion.
+## Setup (about 15 minutes, once)
+
+**1. Make the GitHub repository.** Create a private repository, such as `biot-notebooks`, with a README so the `main` branch exists. Under Settings → Branches, add a rule for `main` that blocks force pushes and deletion.
 
 **2. Make a token.** GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.
 - Repository access: Only select repositories → `biot-notebooks`
 - Repository permissions: Contents → Read and write
-- Expiration: the end of the academic year (put a reminder in your calendar to renew it)
+- Expiration: the end of the academic year (set a calendar reminder to renew it)
 
-**3. Create the Apps Script project.** Sign in to Google with your UMass Boston account and go to script.google.com → New project. Name it “Lab notebook”.
-- In Project Settings, tick “Show ‘appsscript.json’ manifest file in editor”, then replace the contents of `appsscript.json` with the provided file.
+**3. Create the Apps Script project.** Go to script.google.com → New project, and name it "Lab notebook".
+- In Project Settings, tick "Show 'appsscript.json' manifest file in editor", then replace the contents of `appsscript.json` with the provided file.
 - Replace the contents of `Code.gs` with the provided file.
 - Add a file (+ → HTML) named `Index` and paste in `Index.html`.
 
-**4. Add script properties.** Project Settings → Script properties:
+**4. Add script properties.** In Project Settings → Script properties, add:
 
 | Property | Value |
 |---|---|
 | `GITHUB_TOKEN` | the token from step 2 |
 | `GITHUB_OWNER` | your GitHub username (or organization) |
 | `GITHUB_REPO` | `biot-notebooks` |
-| `INSTRUCTORS` | your email, plus any TAs, comma-separated |
-| `ROSTER` | optional: student emails, comma-separated. Leave it out to allow anyone with a UMB account. |
-| `GITHUB_BRANCH`, `ALLOWED_DOMAIN` | optional: default to `main` and `umb.edu` |
+| `ROSTER` | recommended: student emails, comma-separated (see below) |
+| `GITHUB_BRANCH`, `ALLOWED_DOMAIN` | optional; they default to `main` and `umb.edu` |
 
-**5. Deploy.** Deploy → New deployment → type: Web app.
+**5. Deploy.** Go to Deploy → New deployment, choose the Web app type, and set:
 - Execute as: **Me**
-- Who has access: **Anyone within UMass Boston**
+- Who has access: **Anyone**
 
-Authorize when prompted (this lets the script contact GitHub and read the signed-in user’s email). Copy the web app URL.
+Authorize when prompted, which lets the script contact GitHub, then copy the web app URL.
 
-**6. Test, then share.** Open the URL yourself: you should see “(instructor)” next to your email. Save a test entry and check it appears in the GitHub repository. Then post the link in Canvas or Blackboard.
+**6. Test, then share.** Open the URL, enter your own email, save a test entry, and check that it appears in the repository. Then post the link in Canvas or Blackboard.
 
-**Updating the code later:** Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy. The URL stays the same.
+**Updating the code later:** Go to Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy. The URL stays the same.
 
-## What students and instructors can do
+## Reading and grading
 
-Students see and open only their own entries; the server enforces this, not the page. They can add dated, signed addenda to their own entries but can’t edit or delete anything, and have no access to the repository or its history.
+Read entries directly in the GitHub repository. Each student has a folder, the entries and images render natively, and every file's History button shows every version. To leave feedback, comment on the commit in GitHub, or tell students to record your feedback as an addendum.
 
-Instructors (anyone in `INSTRUCTORS`) get a “Showing” menu to view every student or one student at a time, a link to each entry’s history on GitHub, and can add an “Instructor note” to any entry, which the student sees the next time they open it. You can also read everything directly in the GitHub repository, where entries and images render natively.
+## Two things to know
 
-In the Git history, each commit is authored by the student’s name and UMB email and committed through your token, so authorship and timing are traceable for every change.
+**Anyone who types a student's email can open that student's notebook.** No sign-in means the email works like a username without a password. A classmate who knows someone's email could read their entries and save new entries or addenda under their name. They couldn't edit or delete anything, and every save is recorded, but the reading part matters for graded work. If that's a concern, the notebook can add a short PIN that each student sets the first time they use their email.
 
-## Things to know
+**Typos create stray folders.** "jsmtih@umb.edu" files entries in a new, empty notebook. Setting `ROSTER` to the class list prevents this: the page refuses any email not on the list and tells the student to check the spelling.
 
-- **Sign-in confusion:** Students signed in to a personal Gmail account may be shown as the wrong account. The page tells them which account it sees and asks them to switch. A separate browser profile for their UMB account avoids this, as UMB IT also recommends.
-- **IT restrictions:** If UMB’s Google Workspace administrators have restricted Apps Script web apps or outside connections, step 5 or the first save may fail with a permissions message. That would need a request to the IT Service Desk.
-- **Drafts:** Drafts are kept in the student’s browser. If the browser blocks storage for embedded pages, drafts won’t persist across reloads, though saving still works.
-- **File sizes:** Data files are limited to 10 MB each and 25 MB per entry. Larger files should be stored on OneDrive or Google Drive, with the location recorded in the entry.
-- **Names:** Each student’s name is saved once and kept in the script properties, so it follows them across devices.
-- **Regulated work:** This is suited to coursework and internal lab records, not regulated (21 CFR Part 11) work.
+## Other notes
+
+- The email, name and project are remembered in the browser, so students returning on the same computer go straight to their notebook. On a shared lab computer, the next student just types their own email and presses "Switch notebook".
+- Drafts are kept in the browser. If the browser blocks storage for embedded pages, drafts won't survive a reload, but saving still works.
+- Data files are limited to 10 MB each and 25 MB per entry. Larger files should go on OneDrive or Google Drive, with the location recorded in the entry.
+- This setup suits coursework and internal lab records. It isn't meant for regulated (21 CFR Part 11) work.
 
 ## Customizing the template
 
-The form fields are defined in `FIELDS` in `Index.html`. The server accepts the keys listed in `TEXT_KEYS` and builds the Markdown in `buildMarkdown_` in `Code.gs`. To add a field, such as “Safety considerations”, add it in all three places.
+The form fields are defined in `FIELDS` in `Index.html`. The server accepts the keys listed in `TEXT_KEYS` and builds the Markdown in `buildMarkdown_`, both in `Code.gs`. To add a field, add it in all three places.

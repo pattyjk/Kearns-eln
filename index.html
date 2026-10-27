@@ -193,46 +193,58 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 .addendum h2 { font-size: 1.1875rem; margin: 0 0 .25rem; }
 .addendum .row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: .75rem; }
 [hidden] { display: none !important; }
-.who { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); padding: .75rem 1rem; }
-.who .email { font-weight: 700; overflow-wrap: anywhere; margin: 0; }
-.who label { display: block; font-size: .9375rem; margin-top: .75rem; font-weight: 700; }
-.who .row { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; align-items: center; }
-.blocked { max-width: 40rem; padding: 2rem 1.5rem; }
+.grid2 { align-items: end; }
+.span2 { grid-column: 1 / -1; }
+.idbar {
+  max-width: 78rem; margin: 0 auto; padding: 1.25rem 1.5rem 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: .75rem 1rem; align-items: end;
+}
+.idbar label { display: block; font-weight: 700; font-size: .9375rem; margin-bottom: .25rem; }
+.idbar .msg { grid-column: 1 / -1; }
+@media (max-width: 760px) { .idbar { grid-template-columns: 1fr; padding: 1rem 1rem 0; } }
+.intro { max-width: 78rem; margin: 0 auto; padding: 1.5rem; color: var(--muted); }
+.intro p { max-width: 40rem; margin: 0 0 .5rem; }
+#entryList .group { font-size: .9375rem; font-weight: 700; color: var(--muted); margin: 1rem 0 .125rem; padding: 0 .25rem; }
+#entryList .group:first-child { margin-top: .25rem; }
+#entryList .group.current { color: var(--ink); }
 </style>
 </head>
 <body>
 
 <header class="top">
   <h1>Lab notebook</h1>
-  <span id="status" class="status" role="status">Signing in…</span>
+  <span id="status" class="status" role="status"></span>
 </header>
 
-<div id="blocked" class="blocked" hidden>
-  <p id="blockedMsg" class="msg warn"></p>
+<form id="idForm" class="idbar" novalidate>
+  <div>
+    <label for="email">School email</label>
+    <input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="name@umb.edu">
+  </div>
+  <div>
+    <label for="author">Your name</label>
+    <input id="author" autocomplete="name">
+  </div>
+  <div>
+    <label for="project">Project title</label>
+    <input id="project" list="projectList" autocomplete="off">
+    <datalist id="projectList"></datalist>
+  </div>
+  <button class="primary" type="submit" id="openBtn">Open my notebook</button>
+  <p id="idMsg" class="msg" role="status"></p>
+</form>
+
+<div id="intro" class="intro">
+  <p>Enter your school email, your name and the project you’re working on, then open your notebook.</p>
+  <p>Your entries are filed under your email and project. Enter the same email any time to see them again.</p>
 </div>
 
 <div class="layout" id="app" hidden>
   <aside class="side">
-    <div class="who">
-      <p class="hint">Signed in as</p>
-      <p class="email" id="whoEmail"></p>
-      <label for="author">Your name</label>
-      <p class="hint">Printed on every entry you save.</p>
-      <input id="author" autocomplete="name">
-      <div class="row">
-        <button class="quiet" type="button" id="saveName">Save name</button>
-        <p id="nameMsg" class="msg" role="status"></p>
-      </div>
-    </div>
-
-    <section class="entries" aria-labelledby="entriesTitle">
+    <section class="entries" aria-labelledby="entriesTitle" style="margin-top:0">
       <div class="entries-head">
-        <h2 id="entriesTitle">Entries</h2>
+        <h2 id="entriesTitle">Your entries</h2>
         <button class="link" type="button" id="newBtn">New entry</button>
-      </div>
-      <div id="whoWrap" hidden>
-        <label for="whoSelect" class="hint">Showing</label>
-        <select id="whoSelect"></select>
       </div>
       <p id="entriesEmpty" class="hint">Loading entries…</p>
       <ol id="entryList"></ol>
@@ -257,13 +269,12 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     <section id="viewer" class="sheet" hidden aria-label="Saved entry">
       <div class="viewer-head">
         <button type="button" class="quiet" id="backBtn">New entry</button>
-        <a id="historyLink" target="_blank" rel="noopener" hidden>View version history on GitHub</a>
       </div>
       <p id="viewMsg" class="msg" role="status"></p>
       <article id="viewBody" class="md"></article>
       <div class="addendum">
-        <h2 id="addTitle">Add an addendum</h2>
-        <p class="hint" id="addHint">Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and every earlier version is kept.</p>
+        <h2>Add an addendum</h2>
+        <p class="hint">Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and every earlier version is kept.</p>
         <label for="addText" class="hint">Addendum text</label>
         <textarea id="addText" rows="4"></textarea>
         <div class="row">
@@ -284,8 +295,6 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
     del(k) { try { localStorage.removeItem(k); } catch (e) {} }
   };
-
-  // Calls a function in Code.gs and returns a promise.
   const run = (fn, ...args) => new Promise((resolve, reject) => {
     google.script.run
       .withSuccessHandler(resolve)
@@ -296,10 +305,9 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   /* ---------- Entry template (the server builds the Markdown from these keys) ---------- */
   const SECTIONS = ["Entry", "Question and hypothesis", "Materials", "Procedure", "Results", "Interpretation"];
   const FIELDS = [
-    { sec: 0, id: "title", label: "Experiment title", type: "text", req: true },
+    { sec: 0, id: "title", label: "Experiment title", type: "text", req: true, wide: true },
     { sec: 0, id: "date", label: "Date performed", type: "date", req: true },
-    { sec: 0, id: "course", label: "Course or project", type: "text" },
-    { sec: 0, id: "collab", label: "Worked with", type: "text", hint: "Lab partners or collaborators" },
+    { sec: 0, id: "collab", label: "Worked with", type: "text", placeholder: "Lab partners or collaborators" },
     { sec: 1, id: "question", label: "Question", rows: 2, hint: "What are you trying to find out?" },
     { sec: 1, id: "hypothesis", label: "Hypothesis", rows: 3, req: true, hint: "What you expect to happen, and the mechanism you think is responsible." },
     { sec: 1, id: "prediction", label: "Prediction", rows: 2, hint: "If the hypothesis is right, what will you observe? What result would show it’s wrong?" },
@@ -312,23 +320,27 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     { sec: 5, id: "next", label: "Next steps", rows: 2 }
   ];
   const TEXT_FIELDS = FIELDS.filter(f => f.type !== "file");
+  const ID_KEY = "eln-identity";
 
-  let me = null;
+  let conf = { domain: "umb.edu", maxFileBytes: 10485760, maxEntryBytes: 26214400 };
+  let activeEmail = "";       // the notebook currently open
   let allPaths = [];
-  let attachments = []; // { file, name, url }
+  let attachments = [];
   let currentView = null;
   let busy = false;
   let previewSeq = 0;
-  const draftKey = () => `eln-draft:${me ? me.email : ""}`;
+  let formBuilt = false;
 
   /* ---------- Utilities ---------- */
   const todayLocal = () => { const t = new Date(); return new Date(t - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  const slugify = (s) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "entry";
+  const humanize = (slug) => { const w = slug.replace(/-/g, " ").trim(); return w.charAt(0).toUpperCase() + w.slice(1); };
   const safeName = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "file";
   const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
   const esc = (s) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
-  const folderOf = (p) => { const m = p.match(/^entries\/([^/]+)\/\d{4}\/[^/]+\.md$/i); return m ? m[1].toLowerCase() : ""; };
+  const projectOf = (p) => { const m = p.match(/^entries\/[^/]+\/([^/]+)\/[^/]+\.md$/i); return m ? m[1] : ""; };
   const fileToB64 = (file) => new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(String(r.result).split(",")[1] || "");
@@ -336,10 +348,15 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     r.readAsDataURL(file);
   });
   function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-  function setStatus(text, kind) { const s = $("status"); s.textContent = text; s.className = "status" + (kind ? " " + kind : ""); }
+
+  // What the student typed at the top. The email is fixed to the open notebook.
+  const ident = () => ({ email: activeEmail, name: $("author").value.trim(), project: $("project").value.trim() });
+  const draftKey = () => `eln-draft:${activeEmail}`;
 
   /* ---------- Form ---------- */
   function buildForm() {
+    if (formBuilt) return;
+    formBuilt = true;
     const form = $("entryForm");
     SECTIONS.forEach((title, i) => {
       const sec = document.createElement("section");
@@ -350,12 +367,13 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       if (i === 0) wrap.className = "grid2";
       FIELDS.filter(f => f.sec === i).forEach(f => {
         const d = document.createElement("div");
-        d.className = "field"; d.id = `f-${f.id}`;
+        d.className = "field" + (f.wide ? " span2" : ""); d.id = `f-${f.id}`;
         const hintId = f.hint ? `${f.id}-hint` : "";
         const desc = hintId ? `aria-describedby="${hintId}"` : "";
+        const ph = f.placeholder ? `placeholder="${esc(f.placeholder)}"` : "";
         let control;
         if (f.type === "file") control = `<input id="${f.id}" type="file" multiple ${desc}><ul class="files" id="fileList"></ul>`;
-        else if (f.type) control = `<input id="${f.id}" type="${f.type}" ${f.req ? "required" : ""} ${desc}>`;
+        else if (f.type) control = `<input id="${f.id}" type="${f.type}" ${f.req ? "required" : ""} ${desc} ${ph}>`;
         else control = `<textarea id="${f.id}" rows="${f.rows}" ${f.req ? "required" : ""} ${desc}></textarea>`;
         d.innerHTML = `<label for="${f.id}">${esc(f.label)}${f.req ? '<span class="req">required</span>' : ""}</label>` +
           (f.hint ? `<p class="hint" id="${hintId}">${esc(f.hint)}</p>` : "") + control;
@@ -365,10 +383,20 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       form.appendChild(sec);
     });
     $("date").value = todayLocal();
+
+    form.addEventListener("input", (e) => {
+      if (e.target.type !== "file") saveDraft();
+      const f = e.target.closest(".field");
+      if (f && e.target.value.trim()) f.classList.remove("missing");
+    });
+    form.addEventListener("submit", (e) => e.preventDefault());
+    $("files").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
   }
   function values() { const v = {}; TEXT_FIELDS.forEach(f => { v[f.id] = $(f.id).value; }); return v; }
-  function saveDraft() { store.set(draftKey(), values()); }
+  function saveDraft() { if (activeEmail) store.set(draftKey(), values()); }
   function restoreDraft() {
+    TEXT_FIELDS.forEach(f => { $(f.id).value = ""; });
+    $("date").value = todayLocal();
     const d = store.get(draftKey());
     if (!d) return;
     TEXT_FIELDS.forEach(f => { if (typeof d[f.id] === "string" && d[f.id] !== "") $(f.id).value = d[f.id]; });
@@ -387,7 +415,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   function addFiles(list) {
     const rejected = [];
     for (const file of list) {
-      if (file.size > me.maxFileBytes) { rejected.push(file.name); continue; }
+      if (file.size > conf.maxFileBytes) { rejected.push(file.name); continue; }
       let name = safeName(file.name), n = 2;
       const stem = name.replace(/(\.[^.]+)?$/, ""), ext = (name.match(/\.[^.]+$/) || [""])[0];
       while (attachments.some(a => a.name === name)) name = `${stem}-${n++}${ext}`;
@@ -440,7 +468,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     const seq = ++previewSeq;
     $("preview").innerHTML = '<p class="hint">Building preview…</p>';
     try {
-      const md = await run("previewEntry", values(), attachments.map(a => a.name));
+      const md = await run("previewEntry", ident(), values(), attachments.map(a => a.name));
       if (seq !== previewSeq) return;
       renderMarkdown(md, $("preview"));
       $("preview").querySelectorAll("img").forEach(img => {
@@ -462,19 +490,9 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     $("viewer").hidden = false;
     setMsg($("viewMsg"), ""); setMsg($("addMsg"), "");
     $("viewBody").innerHTML = '<p class="hint">Opening entry…</p>';
-    const own = folderOf(path) === me.folder;
-    $("addTitle").textContent = own ? "Add an addendum" : "Add an instructor note";
-    $("addBtn").textContent = own ? "Append addendum" : "Append note";
-    $("addHint").textContent = own
-      ? "Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and every earlier version is kept."
-      : "Your note is added to the end of the student’s entry with the date and your name. The student sees it the next time they open the entry.";
-    if (me.isInstructor) {
-      $("historyLink").hidden = false;
-      $("historyLink").href = `https://github.com/${me.repo}/commits/${encodeURIComponent(me.branch)}/${encPath(path)}`;
-    }
     markCurrent();
     try {
-      const text = await run("getEntry", path);
+      const text = await run("getEntry", ident(), path);
       if (!currentView || currentView.path !== path) return;
       renderEntry(path, text);
     } catch (e) {
@@ -492,7 +510,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       if (!isRelative(src)) return;
       img.alt = img.alt || src;
       try {
-        const a = await run("getAsset", resolvePath(dir, src));
+        const a = await run("getAsset", ident(), resolvePath(dir, src));
         img.src = `data:${a.mime};base64,${a.b64}`;
       } catch (e) { img.replaceWith(document.createTextNode(`[image not found: ${src}]`)); }
     });
@@ -503,7 +521,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
         ev.preventDefault();
         try {
           setMsg($("viewMsg"), `Downloading ${href.split("/").pop()}…`);
-          const f = await run("getAsset", resolvePath(dir, href));
+          const f = await run("getAsset", ident(), resolvePath(dir, href));
           const bin = atob(f.b64);
           const url = URL.createObjectURL(new Blob([Uint8Array.from(bin, c => c.charCodeAt(0))], { type: f.mime }));
           const tmp = document.createElement("a");
@@ -516,7 +534,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     });
   }
 
-  /* ---------- Entries list ---------- */
+  /* ---------- Entries list, grouped by project ---------- */
   function markCurrent() {
     document.querySelectorAll("#entryList button").forEach(b => {
       b.setAttribute("aria-current", String(!!currentView && b.dataset.path === currentView.path));
@@ -524,8 +542,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   }
   async function loadEntries() {
     try {
-      allPaths = await run("listEntries");
-      buildWhoSelect();
+      allPaths = await run("listEntries", ident());
       renderList();
     } catch (e) {
       allPaths = [];
@@ -534,53 +551,100 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       $("entriesEmpty").textContent = e.message;
     }
   }
-  // Students only ever receive their own entries from the server; instructors get a filter.
-  function buildWhoSelect() {
-    if (!me.isInstructor) { $("whoWrap").hidden = true; return; }
-    const sel = $("whoSelect"), prev = sel.value;
-    const folders = [...new Set(allPaths.map(folderOf))].filter(Boolean).sort();
-    sel.innerHTML = "";
-    const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
-    opt("__all", "Every student");
-    folders.forEach(f => opt(f, f === me.folder ? `${f} (you)` : f));
-    $("whoWrap").hidden = false;
-    sel.value = [...sel.options].some(o => o.value === prev) ? prev : "__all";
-  }
   function renderList() {
     const list = $("entryList"), empty = $("entriesEmpty");
-    const who = me.isInstructor ? ($("whoSelect").value || "__all") : me.folder;
-    const paths = allPaths.filter(p => who === "__all" || folderOf(p) === who);
-    const showFolder = me.isInstructor && who === "__all";
     list.innerHTML = "";
-    empty.hidden = paths.length > 0;
-    empty.textContent = me.isInstructor ? "No entries here yet." : "No entries yet. Your first saved entry will appear here.";
-    paths.forEach(p => {
-      const file = p.split("/").pop().replace(/\.md$/i, "");
-      const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
-      const date = m ? m[1] : "";
-      const words = (m ? m[2] : file).replace(/-/g, " ").trim() || "Untitled";
-      const li = document.createElement("li");
-      const b = document.createElement("button");
-      b.type = "button"; b.dataset.path = p;
-      b.textContent = words.charAt(0).toUpperCase() + words.slice(1);
-      const metaText = [date, showFolder ? folderOf(p) : ""].filter(Boolean).join(", ");
-      if (metaText) { const d = document.createElement("span"); d.className = "d"; d.textContent = metaText; b.prepend(d); }
-      b.onclick = () => viewEntry(p);
-      li.appendChild(b);
-      list.appendChild(li);
+    empty.hidden = allPaths.length > 0;
+    empty.textContent = "No entries yet. Your first saved entry will appear here.";
+
+    // Current project first, then the rest alphabetically.
+    const current = slugify($("project").value || "");
+    const projects = [...new Set(allPaths.map(projectOf))].filter(Boolean)
+      .sort((a, b) => (b === current) - (a === current) || a.localeCompare(b));
+
+    const dl = $("projectList");
+    dl.innerHTML = "";
+    projects.forEach(p => { const o = document.createElement("option"); o.value = humanize(p); dl.appendChild(o); });
+
+    projects.forEach(p => {
+      const head = document.createElement("li");
+      head.className = "group" + (p === current ? " current" : "");
+      head.textContent = humanize(p);
+      list.appendChild(head);
+      allPaths.filter(x => projectOf(x) === p).forEach(path => {
+        const file = path.split("/").pop().replace(/\.md$/i, "");
+        const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button"; b.dataset.path = path;
+        b.textContent = humanize(m ? m[2] || "untitled" : file);
+        if (m) { const d = document.createElement("span"); d.className = "d"; d.textContent = m[1]; b.prepend(d); }
+        b.onclick = () => viewEntry(path);
+        li.appendChild(b);
+        list.appendChild(li);
+      });
     });
     markCurrent();
   }
 
+  /* ---------- Opening a notebook ---------- */
+  function checkTopBar(needAll) {
+    const email = $("email").value.trim().toLowerCase();
+    const name = $("author").value.trim();
+    const project = $("project").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { field: "email", msg: "Enter your full school email address." };
+    if (!email.endsWith("@" + conf.domain)) return { field: "email", msg: `Use your @${conf.domain} email address.` };
+    if (needAll && !name) return { field: "author", msg: "Enter your name, so your entries are signed." };
+    if (needAll && !project) return { field: "project", msg: "Enter a project title. Your entries are filed under it." };
+    return null;
+  }
+
+  async function openNotebook() {
+    const problem = checkTopBar(true);
+    if (problem) { setMsg($("idMsg"), problem.msg, "warn"); $(problem.field).focus(); return; }
+    const email = $("email").value.trim().toLowerCase();
+    $("email").value = email;
+    $("openBtn").disabled = true;
+    setMsg($("idMsg"), "Opening your notebook…");
+    try {
+      await run("listEntries", { email }); // checks the email (and the course list, if set) before anything opens
+    } catch (e) {
+      setMsg($("idMsg"), e.message, "warn");
+      $("openBtn").disabled = false;
+      return;
+    }
+    if (activeEmail && activeEmail !== email) clearForm();
+    activeEmail = email;
+    store.set(ID_KEY, { email, name: $("author").value.trim(), project: $("project").value.trim() });
+    $("openBtn").disabled = false;
+    $("openBtn").textContent = "Switch notebook";
+    setMsg($("idMsg"), "");
+    $("status").textContent = `Notebook for ${email}`;
+    $("intro").hidden = true;
+    $("app").hidden = false;
+    buildForm();
+    restoreDraft();
+    showEditor();
+    showTab(false);
+    await loadEntries();
+  }
+
   /* ---------- Saving ---------- */
+  function topBarReady(msgEl) {
+    if ($("email").value.trim().toLowerCase() !== activeEmail) {
+      setMsg(msgEl, "The email at the top has changed. Press “Switch notebook” first, or change it back.", "warn");
+      return false;
+    }
+    const problem = checkTopBar(true);
+    if (problem) { setMsg(msgEl, problem.msg, "warn"); $(problem.field).focus(); return false; }
+    store.set(ID_KEY, ident());
+    return true;
+  }
+
   async function commitEntry() {
     if (busy) return;
     const msg = $("commitMsg");
-    if (!me.name) {
-      setMsg(msg, "Add and save your name first, so the entry is signed.", "warn");
-      $("author").focus();
-      return;
-    }
+    if (!topBarReady(msg)) return;
     const v = values();
     document.querySelectorAll(".field.missing").forEach(el => el.classList.remove("missing"));
     const missing = FIELDS.filter(f => f.req && !(v[f.id] || "").trim());
@@ -591,8 +655,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       $(missing[0].id).focus();
       return;
     }
-    const total = attachments.reduce((s, a) => s + a.file.size, 0);
-    if (total > me.maxEntryBytes) {
+    if (attachments.reduce((s, a) => s + a.file.size, 0) > conf.maxEntryBytes) {
       setMsg(msg, "The attached files add up to more than 25 MB. Split them across entries or store some elsewhere.", "warn");
       return;
     }
@@ -601,12 +664,12 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     try {
       setMsg(msg, attachments.length ? "Uploading entry and data files…" : "Saving entry…");
       const files = await Promise.all(attachments.map(async a => ({ name: a.name, b64: await fileToB64(a.file) })));
-      const path = await run("saveEntry", { fields: v, files });
+      const path = await run("saveEntry", ident(), { fields: v, files });
       clearForm();
       setMsg(msg, "Your text is kept as a draft in this browser until you save.");
       await loadEntries();
       await viewEntry(path);
-      setMsg($("viewMsg"), "Saved to notebook.", "ok");
+      setMsg($("viewMsg"), `Saved to notebook under “${$("project").value.trim()}”.`, "ok");
     } catch (e) {
       setMsg(msg, e.message + " Your draft is still here.", "warn");
     } finally {
@@ -617,14 +680,14 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 
   async function appendAddendum() {
     if (busy || !currentView) return;
-    const text = $("addText").value.trim();
     const msg = $("addMsg");
+    const text = $("addText").value.trim();
     if (!text) { setMsg(msg, "Write the addendum first.", "warn"); $("addText").focus(); return; }
-    if (!me.name) { setMsg(msg, "Add and save your name first.", "warn"); $("author").focus(); return; }
+    if (!topBarReady(msg)) return;
     busy = true; $("addBtn").disabled = true;
     try {
       setMsg(msg, "Saving…");
-      const updated = await run("appendAddendum", currentView.path, text);
+      const updated = await run("appendAddendum", ident(), currentView.path, text);
       renderEntry(currentView.path, updated);
       $("addText").value = "";
       setMsg(msg, "Saved.", "ok");
@@ -635,60 +698,40 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     }
   }
 
-  async function saveName() {
-    const msg = $("nameMsg");
-    try {
-      setMsg(msg, "Saving…");
-      me.name = await run("setName", $("author").value);
-      $("author").value = me.name;
-      setMsg(msg, "Saved.", "ok");
-    } catch (e) { setMsg(msg, e.message, "warn"); }
-  }
-
   /* ---------- Start ---------- */
-  async function start() {
+  $("idForm").addEventListener("submit", (e) => { e.preventDefault(); openNotebook(); });
+  $("project").addEventListener("change", () => { if (activeEmail) { store.set(ID_KEY, ident()); renderList(); } });
+  $("author").addEventListener("change", () => { if (activeEmail) store.set(ID_KEY, ident()); });
+  $("tabWrite").onclick = () => showTab(false);
+  $("tabPreview").onclick = () => showTab(true);
+  $("commitBtn").onclick = commitEntry;
+  $("discardBtn").onclick = () => {
+    if (confirm("Discard this draft? All text and attached files will be cleared.")) {
+      clearForm(); showTab(false);
+      setMsg($("commitMsg"), "Draft discarded.");
+    }
+  };
+  $("newBtn").onclick = () => { showEditor(); showTab(false); $("title").focus(); };
+  $("backBtn").onclick = () => { showEditor(); showTab(false); };
+  $("addBtn").onclick = appendAddendum;
+
+  (async () => {
     try {
-      me = await run("whoami");
+      conf = await run("config");
+      $("email").placeholder = `name@${conf.domain}`;
     } catch (e) {
-      setStatus("Not signed in", "warn");
-      $("blocked").hidden = false;
-      setMsg($("blockedMsg"), e.message, "warn");
+      setMsg($("idMsg"), e.message, "warn");
+      $("openBtn").disabled = true;
       return;
     }
-    setStatus(me.isInstructor ? `Signed in as ${me.email} (instructor)` : `Signed in as ${me.email}`, "ok");
-    $("whoEmail").textContent = me.email;
-    $("author").value = me.name || "";
-    if (!me.name) setMsg($("nameMsg"), "Add your name to start saving entries.", "warn");
-    $("app").hidden = false;
-    buildForm();
-    restoreDraft();
-
-    $("entryForm").addEventListener("input", (e) => {
-      if (e.target.type !== "file") saveDraft();
-      const f = e.target.closest(".field");
-      if (f && e.target.value.trim()) f.classList.remove("missing");
-    });
-    $("entryForm").addEventListener("submit", (e) => e.preventDefault());
-    $("files").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
-    $("tabWrite").onclick = () => showTab(false);
-    $("tabPreview").onclick = () => showTab(true);
-    $("commitBtn").onclick = commitEntry;
-    $("discardBtn").onclick = () => {
-      if (confirm("Discard this draft? All text and attached files will be cleared.")) {
-        clearForm(); showTab(false);
-        setMsg($("commitMsg"), "Draft discarded.");
-      }
-    };
-    $("newBtn").onclick = () => { showEditor(); showTab(false); $("title").focus(); };
-    $("backBtn").onclick = () => { showEditor(); showTab(false); };
-    $("addBtn").onclick = appendAddendum;
-    $("saveName").onclick = saveName;
-    $("author").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveName(); } });
-    $("whoSelect").addEventListener("change", renderList);
-
-    loadEntries();
-  }
-  start();
+    const saved = store.get(ID_KEY);
+    if (saved && saved.email) {
+      $("email").value = saved.email;
+      $("author").value = saved.name || "";
+      $("project").value = saved.project || "";
+      if (saved.name && saved.project) openNotebook();
+    }
+  })();
 })();
 </script>
 </body>
