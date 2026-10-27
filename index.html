@@ -86,6 +86,8 @@ a { color: var(--accent); }
 .entries { margin-top: 1.5rem; }
 .entries-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .entries h2 { font-size: 1.0625rem; margin: 0; }
+#whoWrap { margin-top: .5rem; }
+#whoWrap label { display: block; margin: 0 0 .25rem; font-weight: 400; }
 #entryList { list-style: none; padding: 0; margin: .5rem 0 0; max-height: 62vh; overflow: auto; }
 #entryList button {
   display: block; width: 100%; text-align: left; background: none; border: 0;
@@ -231,6 +233,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
         <h2 id="entriesTitle">Entries</h2>
         <button class="link" type="button" id="newBtn">New entry</button>
       </div>
+      <div id="whoWrap" hidden>
+        <label for="whoSelect" class="hint">Showing</label>
+        <select id="whoSelect"></select>
+      </div>
       <p id="entriesEmpty" class="hint">Connect to see your saved entries.</p>
       <ol id="entryList"></ol>
     </section>
@@ -309,6 +315,8 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   const qp = new URLSearchParams(location.search);
   ["owner", "repo", "branch"].forEach(k => { if (qp.get(k)) cfg[k] = qp.get(k); });
   let connected = false;
+  let login = "";        // GitHub username of the person connected
+  let allPaths = [];     // every entry path in the repository
   let attachments = []; // { file, name, url }
   let currentView = null;
   let busy = false;
@@ -320,6 +328,12 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "entry";
   const safeName = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "file";
+  // Each student's entries live in entries/<github-username>/<year>/
+  const studentFolder = () => (login || slugify(cfg.author || "student")).toLowerCase();
+  const folderOf = (p) => {
+    const m = p.match(/^entries\/([^/]+)\/\d{4}\/[^/]+\.md$/i);
+    return m ? m[1].toLowerCase() : "";   // "" = older entry saved before folders existed
+  };
   const isImage = (n) => /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
   const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
   const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
@@ -490,11 +504,12 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     yaml("title", v.title);
     L.push(`date: ${v.date}`);
     yaml("author", v.author);
+    yaml("student", studentFolder());
     yaml("course", v.course);
     L.push(`recorded: ${new Date().toISOString()}`, "---", "");
     L.push(`# ${v.title.trim()}`, "");
     L.push(`- **Date performed:** ${v.date}`);
-    if (v.author.trim()) L.push(`- **Recorded by:** ${v.author.trim()}`);
+    if (v.author.trim()) L.push(`- **Recorded by:** ${v.author.trim()}${login ? ` (@${login})` : ""}`);
     if (v.course.trim()) L.push(`- **Course or project:** ${v.course.trim()}`);
     if (v.collab.trim()) L.push(`- **Worked with:** ${v.collab.trim()}`);
     L.push("");
@@ -618,38 +633,71 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     });
   }
   async function loadEntries() {
-    const list = $("entryList"), empty = $("entriesEmpty");
+    const empty = $("entriesEmpty");
     try {
       const res = await api(`${repoBase()}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
       const tree = (await res.json()).tree || [];
-      const paths = tree.filter(t => t.type === "blob" && /^entries\/.+\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
+      allPaths = tree.filter(t => t.type === "blob" && /^entries\/.+\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
         .map(t => t.path)
         .sort((a, b) => b.split("/").pop().localeCompare(a.split("/").pop()));
-      list.innerHTML = "";
-      empty.hidden = paths.length > 0;
-      empty.textContent = "No entries yet. Your first saved entry will appear here.";
-      paths.forEach(p => {
-        const file = p.split("/").pop().replace(/\.md$/i, "");
-        const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
-        const date = m ? m[1] : "";
-        const words = (m ? m[2] : file).replace(/-/g, " ").trim() || "Untitled";
-        const li = document.createElement("li");
-        const b = document.createElement("button");
-        b.type = "button"; b.dataset.path = p;
-        b.textContent = words.charAt(0).toUpperCase() + words.slice(1);
-        if (date) { const d = document.createElement("span"); d.className = "d"; d.textContent = date; b.prepend(d); }
-        b.onclick = () => viewEntry(p);
-        li.appendChild(b);
-        list.appendChild(li);
-      });
-      markCurrent();
+      buildWhoSelect();
+      renderList();
     } catch (e) {
-      list.innerHTML = "";
+      allPaths = [];
+      $("entryList").innerHTML = "";
+      $("whoWrap").hidden = true;
       empty.hidden = false;
       empty.textContent = e.status === 404 || e.status === 409
         ? "No entries yet. Your first saved entry will appear here."
         : e.message;
     }
+  }
+
+  // The filter only appears when the repository holds more than one student's folder
+  // (a shared class repository, or the instructor looking across notebooks).
+  function buildWhoSelect() {
+    const sel = $("whoSelect");
+    const prev = sel.value;
+    const mine = studentFolder();
+    const others = [...new Set(allPaths.map(folderOf))].filter(f => f && f !== mine).sort();
+    const hasLegacy = allPaths.some(p => !folderOf(p));
+    sel.innerHTML = "";
+    const opt = (value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; sel.appendChild(o); };
+    opt(mine, `My entries (${mine})`);
+    others.forEach(f => opt(f, f));
+    if (hasLegacy) opt("__legacy", "Not in a student folder");
+    opt("__all", "Everyone");
+    $("whoWrap").hidden = !(others.length || hasLegacy);
+    sel.value = [...sel.options].some(o => o.value === prev) ? prev : mine;
+  }
+
+  function renderList() {
+    const list = $("entryList"), empty = $("entriesEmpty");
+    const who = $("whoSelect").value || studentFolder();
+    const paths = allPaths.filter(p =>
+      who === "__all" ? true : who === "__legacy" ? !folderOf(p) : folderOf(p) === who);
+    const showFolder = who === "__all";
+    list.innerHTML = "";
+    empty.hidden = paths.length > 0;
+    empty.textContent = who === studentFolder()
+      ? "No entries yet. Your first saved entry will appear here."
+      : "No entries here.";
+    paths.forEach(p => {
+      const file = p.split("/").pop().replace(/\.md$/i, "");
+      const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
+      const date = m ? m[1] : "";
+      const words = (m ? m[2] : file).replace(/-/g, " ").trim() || "Untitled";
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button"; b.dataset.path = p;
+      b.textContent = words.charAt(0).toUpperCase() + words.slice(1);
+      const metaText = [date, showFolder ? (folderOf(p) || "no folder") : ""].filter(Boolean).join(", ");
+      if (metaText) { const d = document.createElement("span"); d.className = "d"; d.textContent = metaText; b.prepend(d); }
+      b.onclick = () => viewEntry(p);
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+    markCurrent();
   }
 
   /* ---------- Connection ---------- */
@@ -668,8 +716,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
         if (e.status === 404) throw new Error(`The branch “${cfg.branch}” doesn’t exist in ${cfg.owner}/${cfg.repo}. If the repository is empty, add a README on GitHub first; otherwise check the branch name (often “main”).`);
         throw e;
       }
+      try { login = ((await (await api("/user")).json()).login || "").trim(); }
+      catch { login = ""; } // falls back to a folder named from "Your name"
       connected = true;
-      setStatus(`Connected to ${cfg.owner}/${cfg.repo}`, "ok");
+      setStatus(`Connected to ${cfg.owner}/${cfg.repo}${login ? ` as ${login}` : ""}`, "ok");
       setMsg(msg, "Connected.", "ok");
       $("connDetails").open = false;
       await loadEntries();
@@ -711,7 +761,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     let uploaded = 0;
     try {
       setMsg(msg, "Checking the notebook…");
-      const dir = `entries/${v.date.slice(0, 4)}`;
+      const dir = `entries/${studentFolder()}/${v.date.slice(0, 4)}`;
       const base = `${v.date}-${slugify(v.title)}`;
       let name = base, n = 2;
       while (await exists(`${dir}/${name}.md`)) name = `${base}-${n++}`;
@@ -727,6 +777,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       await putFile(path, utf8ToB64(buildMarkdown(v, assetBase)), `Notebook entry: ${v.title.trim()} (${v.date})`);
       clearForm();
       setMsg(msg, "Your text is kept as a draft in this browser until you save.");
+      $("whoSelect").value = "";
       await loadEntries();
       await viewEntry(path);
       setMsg($("viewMsg"), "Saved to notebook.", "ok");
@@ -788,6 +839,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   $("newBtn").onclick = () => { showEditor(); showTab(false); $("title").focus(); };
   $("backBtn").onclick = () => { showEditor(); showTab(false); };
   $("addBtn").onclick = appendAddendum;
+  $("whoSelect").addEventListener("change", renderList);
 
   $("connForm").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -805,6 +857,8 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     cfg.token = ""; $("token").value = "";
     store.set(CFG_KEY, cfg);
     connected = false;
+    login = ""; allPaths = [];
+    $("whoWrap").hidden = true;
     setStatus("Not connected");
     setMsg($("connMsg"), "Token removed from this browser.", "ok");
     $("entryList").innerHTML = "";

@@ -8,15 +8,23 @@ The whole app is one file, `index.html`. It has no server and stores no data of 
 
 ```
 entries/
-  2026/
-    2026-10-27-pcr-optimization.md
-    assets/
-      2026-10-27-pcr-optimization/
-        gel-lane-1-6.png
-        plate-reader.csv
+  jsmith-umb/                      ← one folder per student (their GitHub username)
+    2026/
+      2026-10-27-pcr-optimization.md
+      assets/
+        2026-10-27-pcr-optimization/
+          gel-lane-1-6.png
+          plate-reader.csv
+  apatel22/
+    2026/
+      ...
 ```
 
-Each entry has YAML front matter (title, date, author, course, recorded timestamp), so the folder can later be rendered with Jekyll or Quarto without changes. GitHub also renders the entries and their images directly in the repository, which is the easiest place to read and grade them.
+The folder name is the student’s GitHub username, read from their token when they connect, so it’s unique and students can’t mistype it. If the username can’t be read, the folder is named from “Your name” instead.
+
+When a repository holds more than one student’s folder, a “Showing” menu appears above the entries list: “My entries” by default, any other student’s folder, or everyone at once (with each entry labeled by folder). Entries saved before folders were added stay where they are and appear under “Not in a student folder”.
+
+Each entry has YAML front matter (title, date, author, student username, course, recorded timestamp), so the folder can later be rendered with Jekyll or Quarto without changes. GitHub also renders the entries and their images directly in the repository, which is the easiest place to read and grade them.
 
 Saved entries are never rewritten by the app. Corrections are appended as dated, signed addenda, and the full version history is one click away.
 
