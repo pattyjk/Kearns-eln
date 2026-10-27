@@ -1,9 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<base target="_top">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Lab notebook</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -194,39 +193,37 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
 .addendum h2 { font-size: 1.1875rem; margin: 0 0 .25rem; }
 .addendum .row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: .75rem; }
 [hidden] { display: none !important; }
+.who { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); padding: .75rem 1rem; }
+.who .email { font-weight: 700; overflow-wrap: anywhere; margin: 0; }
+.who label { display: block; font-size: .9375rem; margin-top: .75rem; font-weight: 700; }
+.who .row { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; align-items: center; }
+.blocked { max-width: 40rem; padding: 2rem 1.5rem; }
 </style>
 </head>
 <body>
 
 <header class="top">
   <h1>Lab notebook</h1>
-  <span id="status" class="status" role="status">Not connected</span>
+  <span id="status" class="status" role="status">Signing in…</span>
 </header>
 
-<div class="layout">
+<div id="blocked" class="blocked" hidden>
+  <p id="blockedMsg" class="msg warn"></p>
+</div>
+
+<div class="layout" id="app" hidden>
   <aside class="side">
-    <details id="connDetails" open>
-      <summary>Connection</summary>
-      <form id="connForm" autocomplete="off">
-        <label for="owner">GitHub account or organization</label>
-        <input id="owner" required spellcheck="false">
-        <label for="repo">Notebook repository</label>
-        <input id="repo" required spellcheck="false">
-        <label for="branch">Branch</label>
-        <input id="branch" value="main" required spellcheck="false">
-        <label for="author">Your name</label>
-        <p class="hint">Printed on every entry you save.</p>
-        <input id="author" required>
-        <label for="token">Access token</label>
-        <p class="hint">A fine-grained token with Contents: Read and write on this one repository. It stays in this browser and is only sent to GitHub.</p>
-        <input id="token" type="password" required spellcheck="false">
-        <div class="row">
-          <button class="primary" type="submit" id="connectBtn">Connect</button>
-          <button class="quiet" type="button" id="forgetBtn">Forget token</button>
-        </div>
-        <p id="connMsg" class="msg" role="status"></p>
-      </form>
-    </details>
+    <div class="who">
+      <p class="hint">Signed in as</p>
+      <p class="email" id="whoEmail"></p>
+      <label for="author">Your name</label>
+      <p class="hint">Printed on every entry you save.</p>
+      <input id="author" autocomplete="name">
+      <div class="row">
+        <button class="quiet" type="button" id="saveName">Save name</button>
+        <p id="nameMsg" class="msg" role="status"></p>
+      </div>
+    </div>
 
     <section class="entries" aria-labelledby="entriesTitle">
       <div class="entries-head">
@@ -237,7 +234,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
         <label for="whoSelect" class="hint">Showing</label>
         <select id="whoSelect"></select>
       </div>
-      <p id="entriesEmpty" class="hint">Connect to see your saved entries.</p>
+      <p id="entriesEmpty" class="hint">Loading entries…</p>
       <ol id="entryList"></ol>
     </section>
   </aside>
@@ -260,13 +257,13 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     <section id="viewer" class="sheet" hidden aria-label="Saved entry">
       <div class="viewer-head">
         <button type="button" class="quiet" id="backBtn">New entry</button>
-        <a id="historyLink" target="_blank" rel="noopener">View version history on GitHub</a>
+        <a id="historyLink" target="_blank" rel="noopener" hidden>View version history on GitHub</a>
       </div>
       <p id="viewMsg" class="msg" role="status"></p>
       <article id="viewBody" class="md"></article>
       <div class="addendum">
-        <h2>Add an addendum</h2>
-        <p class="hint">Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and GitHub keeps every earlier version.</p>
+        <h2 id="addTitle">Add an addendum</h2>
+        <p class="hint" id="addHint">Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and every earlier version is kept.</p>
         <label for="addText" class="hint">Addendum text</label>
         <textarea id="addText" rows="4"></textarea>
         <div class="row">
@@ -283,14 +280,20 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   "use strict";
   const $ = (id) => document.getElementById(id);
   const store = {
-    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-    del(k) { try { localStorage.removeItem(k); } catch {} }
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+    del(k) { try { localStorage.removeItem(k); } catch (e) {} }
   };
-  const CFG_KEY = "eln-config", DRAFT_KEY = "eln-draft";
-  const MAX_FILE = 25 * 1024 * 1024;
 
-  /* ---------- Entry template ---------- */
+  // Calls a function in Code.gs and returns a promise.
+  const run = (fn, ...args) => new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(e => reject(new Error(String((e && e.message) || e).replace(/^(Exception|Error):\s*/, ""))))
+      [fn](...args);
+  });
+
+  /* ---------- Entry template (the server builds the Markdown from these keys) ---------- */
   const SECTIONS = ["Entry", "Question and hypothesis", "Materials", "Procedure", "Results", "Interpretation"];
   const FIELDS = [
     { sec: 0, id: "title", label: "Experiment title", type: "text", req: true },
@@ -304,111 +307,38 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     { sec: 3, id: "procedure", label: "Procedure", rows: 7, req: true, hint: "What you actually did, in order. Include volumes, concentrations, times and temperatures." },
     { sec: 3, id: "deviations", label: "Deviations from the protocol", rows: 2, hint: "Anything that differed from the plan, and why." },
     { sec: 4, id: "observations", label: "Observations and results", rows: 7, req: true, hint: "Raw observations and measurements as you recorded them, before interpretation." },
-    { sec: 4, id: "files", label: "Data files", type: "file", hint: "Gel images, plate reader exports, spreadsheets. Each file is saved in the notebook next to this entry." },
+    { sec: 4, id: "files", label: "Data files", type: "file", hint: "Gel images, plate reader exports, spreadsheets, up to 10 MB each. Each file is saved in the notebook next to this entry." },
     { sec: 5, id: "interpretation", label: "Interpretation", rows: 4, hint: "Do the results support the prediction? What else could explain them?" },
     { sec: 5, id: "next", label: "Next steps", rows: 2 }
   ];
   const TEXT_FIELDS = FIELDS.filter(f => f.type !== "file");
 
-  /* ---------- State ---------- */
-  let cfg = Object.assign({ owner: "", repo: "", branch: "main", token: "", author: "" }, store.get(CFG_KEY) || {});
-  const qp = new URLSearchParams(location.search);
-  ["owner", "repo", "branch"].forEach(k => { if (qp.get(k)) cfg[k] = qp.get(k); });
-  let connected = false;
-  let login = "";        // GitHub username of the person connected
-  let allPaths = [];     // every entry path in the repository
+  let me = null;
+  let allPaths = [];
   let attachments = []; // { file, name, url }
   let currentView = null;
   let busy = false;
+  let previewSeq = 0;
+  const draftKey = () => `eln-draft:${me ? me.email : ""}`;
 
   /* ---------- Utilities ---------- */
   const todayLocal = () => { const t = new Date(); return new Date(t - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
-  const stamp = () => { const t = new Date(); const l = new Date(t - t.getTimezoneOffset() * 60000).toISOString(); return `${l.slice(0, 10)} ${l.slice(11, 16)}`; };
-  const slugify = (s) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "entry";
   const safeName = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "file";
-  // Each student's entries live in entries/<github-username>/<year>/
-  const studentFolder = () => (login || slugify(cfg.author || "student")).toLowerCase();
-  const folderOf = (p) => {
-    const m = p.match(/^entries\/([^/]+)\/\d{4}\/[^/]+\.md$/i);
-    return m ? m[1].toLowerCase() : "";   // "" = older entry saved before folders existed
-  };
-  const isImage = (n) => /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
   const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
-  const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
   const esc = (s) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-  function bytesToB64(bytes) {
-    let s = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-    return btoa(s);
-  }
-  const utf8ToB64 = (str) => bytesToB64(new TextEncoder().encode(str));
-  const b64ToUtf8 = (b64) => {
-    const bin = atob(b64.replace(/\s/g, ""));
-    return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
-  };
+  const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
+  const folderOf = (p) => { const m = p.match(/^entries\/([^/]+)\/\d{4}\/[^/]+\.md$/i); return m ? m[1].toLowerCase() : ""; };
+  const fileToB64 = (file) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",")[1] || "");
+    r.onerror = () => rej(new Error(`Couldn’t read ${file.name}.`));
+    r.readAsDataURL(file);
+  });
   function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
   function setStatus(text, kind) { const s = $("status"); s.textContent = text; s.className = "status" + (kind ? " " + kind : ""); }
 
-  /* ---------- GitHub API ---------- */
-  function friendly(status, m) {
-    if (status === 401) return "GitHub rejected the access token. It may have expired or been mistyped. Create a new token and connect again.";
-    if (status === 403 && /rate limit/i.test(m)) return "GitHub’s rate limit was reached. Wait a few minutes and try again.";
-    if (status === 403) return "The token doesn’t have permission for this. It needs Contents: Read and write on this repository" + (m ? ` (GitHub said: ${m})` : "") + ".";
-    if (status === 404) return "GitHub couldn’t find that repository, branch or file. Check the names, and that the token was given access to this repository.";
-    if (status === 409) return "The notebook changed on GitHub while you were working. Open the entry again and retry.";
-    if (status === 422 || status === 413) return "GitHub refused the file" + (m ? `: ${m}` : "") + ".";
-    return `GitHub returned an error (${status})` + (m ? `: ${m}` : "") + ".";
-  }
-  async function api(path, opts = {}, accept = "application/vnd.github+json") {
-    let res;
-    try {
-      res = await fetch("https://api.github.com" + path, {
-        ...opts,
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          Accept: accept,
-          "X-GitHub-Api-Version": "2022-11-28",
-          ...(opts.body ? { "Content-Type": "application/json" } : {})
-        }
-      });
-    } catch {
-      const e = new Error("Couldn’t reach GitHub. Check your internet connection and try again.");
-      e.status = 0; throw e;
-    }
-    if (!res.ok) {
-      let m = ""; try { m = (await res.json()).message || ""; } catch {}
-      const e = new Error(friendly(res.status, m)); e.status = res.status; throw e;
-    }
-    return res;
-  }
-  const repoBase = () => `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}`;
-  const contentsUrl = (p) => `${repoBase()}/contents/${encPath(p)}`;
-  async function exists(p) {
-    try { await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`); return true; }
-    catch (e) { if (e.status === 404) return false; throw e; }
-  }
-  async function putFile(p, b64, message, sha) {
-    const body = { message, content: b64, branch: cfg.branch };
-    if (sha) body.sha = sha;
-    const res = await api(contentsUrl(p), { method: "PUT", body: JSON.stringify(body) });
-    return res.json();
-  }
-  async function getText(p) {
-    const res = await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`);
-    const j = await res.json();
-    if (j.content) return { text: b64ToUtf8(j.content), sha: j.sha };
-    const raw = await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`, {}, "application/vnd.github.raw+json");
-    return { text: await raw.text(), sha: j.sha };
-  }
-  async function getBlobUrl(p) {
-    const res = await api(`${contentsUrl(p)}?ref=${encodeURIComponent(cfg.branch)}`, {}, "application/vnd.github.raw+json");
-    return URL.createObjectURL(await res.blob());
-  }
-
-  /* ---------- Build the form ---------- */
+  /* ---------- Form ---------- */
   function buildForm() {
     const form = $("entryForm");
     SECTIONS.forEach((title, i) => {
@@ -422,14 +352,11 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
         const d = document.createElement("div");
         d.className = "field"; d.id = `f-${f.id}`;
         const hintId = f.hint ? `${f.id}-hint` : "";
+        const desc = hintId ? `aria-describedby="${hintId}"` : "";
         let control;
-        if (f.type === "file") {
-          control = `<input id="${f.id}" type="file" multiple ${hintId ? `aria-describedby="${hintId}"` : ""}><ul class="files" id="fileList"></ul>`;
-        } else if (f.type) {
-          control = `<input id="${f.id}" type="${f.type}" ${f.req ? "required" : ""} ${hintId ? `aria-describedby="${hintId}"` : ""}>`;
-        } else {
-          control = `<textarea id="${f.id}" rows="${f.rows}" ${f.req ? "required" : ""} ${hintId ? `aria-describedby="${hintId}"` : ""}></textarea>`;
-        }
+        if (f.type === "file") control = `<input id="${f.id}" type="file" multiple ${desc}><ul class="files" id="fileList"></ul>`;
+        else if (f.type) control = `<input id="${f.id}" type="${f.type}" ${f.req ? "required" : ""} ${desc}>`;
+        else control = `<textarea id="${f.id}" rows="${f.rows}" ${f.req ? "required" : ""} ${desc}></textarea>`;
         d.innerHTML = `<label for="${f.id}">${esc(f.label)}${f.req ? '<span class="req">required</span>' : ""}</label>` +
           (f.hint ? `<p class="hint" id="${hintId}">${esc(f.hint)}</p>` : "") + control;
         wrap.appendChild(d);
@@ -439,18 +366,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     });
     $("date").value = todayLocal();
   }
-
-  function values() {
-    const v = {};
-    TEXT_FIELDS.forEach(f => { v[f.id] = $(f.id).value; });
-    v.author = cfg.author || "";
-    return v;
-  }
-
-  /* ---------- Draft ---------- */
-  function saveDraft() { store.set(DRAFT_KEY, values()); }
+  function values() { const v = {}; TEXT_FIELDS.forEach(f => { v[f.id] = $(f.id).value; }); return v; }
+  function saveDraft() { store.set(draftKey(), values()); }
   function restoreDraft() {
-    const d = store.get(DRAFT_KEY);
+    const d = store.get(draftKey());
     if (!d) return;
     TEXT_FIELDS.forEach(f => { if (typeof d[f.id] === "string" && d[f.id] !== "") $(f.id).value = d[f.id]; });
   }
@@ -461,21 +380,21 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     attachments = [];
     renderFiles();
     document.querySelectorAll(".field.missing").forEach(el => el.classList.remove("missing"));
-    store.del(DRAFT_KEY);
+    store.del(draftKey());
   }
 
   /* ---------- Attachments ---------- */
   function addFiles(list) {
     const rejected = [];
     for (const file of list) {
-      if (file.size > MAX_FILE) { rejected.push(file.name); continue; }
+      if (file.size > me.maxFileBytes) { rejected.push(file.name); continue; }
       let name = safeName(file.name), n = 2;
       const stem = name.replace(/(\.[^.]+)?$/, ""), ext = (name.match(/\.[^.]+$/) || [""])[0];
       while (attachments.some(a => a.name === name)) name = `${stem}-${n++}${ext}`;
       attachments.push({ file, name, url: URL.createObjectURL(file) });
     }
     renderFiles();
-    if (rejected.length) setMsg($("commitMsg"), `Not attached (over 25 MB): ${rejected.join(", ")}. Store large files elsewhere and note their location in the entry.`, "warn");
+    if (rejected.length) setMsg($("commitMsg"), `Not attached (over 10 MB): ${rejected.join(", ")}. Store large files elsewhere and note their location in the entry.`, "warn");
   }
   function renderFiles() {
     const ul = $("fileList");
@@ -496,57 +415,11 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     });
   }
 
-  /* ---------- Markdown ---------- */
-  function buildMarkdown(v, assetBase) {
-    const L = [];
-    const yaml = (k, val) => { if (val && val.trim()) L.push(`${k}: ${JSON.stringify(val.trim())}`); };
-    L.push("---");
-    yaml("title", v.title);
-    L.push(`date: ${v.date}`);
-    yaml("author", v.author);
-    yaml("student", studentFolder());
-    yaml("course", v.course);
-    L.push(`recorded: ${new Date().toISOString()}`, "---", "");
-    L.push(`# ${v.title.trim()}`, "");
-    L.push(`- **Date performed:** ${v.date}`);
-    if (v.author.trim()) L.push(`- **Recorded by:** ${v.author.trim()}${login ? ` (@${login})` : ""}`);
-    if (v.course.trim()) L.push(`- **Course or project:** ${v.course.trim()}`);
-    if (v.collab.trim()) L.push(`- **Worked with:** ${v.collab.trim()}`);
-    L.push("");
-    const sec = (h, text, fallback) => {
-      const t = (text || "").trim();
-      if (t || fallback) L.push(`## ${h}`, "", t || fallback, "");
-    };
-    sec("Question", v.question);
-    sec("Hypothesis", v.hypothesis);
-    sec("Prediction", v.prediction);
-    sec("Materials and reagents", v.materials);
-    sec("Procedure", v.procedure);
-    sec("Deviations from the protocol", v.deviations, "_None recorded._");
-    sec("Observations and results", v.observations);
-    if (attachments.length) {
-      L.push("### Data files", "");
-      attachments.filter(a => isImage(a.name)).forEach(a => L.push(`![${a.name}](${assetBase}/${a.name})`, ""));
-      const others = attachments.filter(a => !isImage(a.name));
-      others.forEach(a => L.push(`- [${a.name}](${assetBase}/${a.name})`));
-      if (others.length) L.push("");
-    }
-    sec("Interpretation", v.interpretation);
-    sec("Next steps", v.next);
-    return L.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-  }
-
+  /* ---------- Markdown rendering ---------- */
   function renderMarkdown(md, el) {
     const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, "");
-    let html;
-    if (window.marked && window.DOMPurify) {
-      html = DOMPurify.sanitize(marked.parse(body));
-    } else {
-      html = `<pre>${esc(body)}</pre>`;
-    }
-    el.innerHTML = html;
+    el.innerHTML = (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(body)) : `<pre>${esc(body)}</pre>`;
   }
-
   function resolvePath(dir, rel) {
     const parts = dir.split("/").filter(Boolean);
     for (const seg of rel.split("/")) {
@@ -558,48 +431,58 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
   const isRelative = (u) => u && !/^([a-z][a-z0-9+.\-]*:|#|\/\/)/i.test(u);
 
   /* ---------- Tabs ---------- */
-  function showTab(preview) {
+  async function showTab(preview) {
     $("tabWrite").setAttribute("aria-selected", String(!preview));
     $("tabPreview").setAttribute("aria-selected", String(preview));
     $("entryForm").hidden = preview;
     $("preview").hidden = !preview;
-    if (preview) {
-      renderMarkdown(buildMarkdown(values(), "assets/preview"), $("preview"));
+    if (!preview) return;
+    const seq = ++previewSeq;
+    $("preview").innerHTML = '<p class="hint">Building preview…</p>';
+    try {
+      const md = await run("previewEntry", values(), attachments.map(a => a.name));
+      if (seq !== previewSeq) return;
+      renderMarkdown(md, $("preview"));
       $("preview").querySelectorAll("img").forEach(img => {
         const name = (img.getAttribute("src") || "").split("/").pop();
         const a = attachments.find(x => x.name === name);
         if (a) img.src = a.url;
       });
+    } catch (e) {
+      if (seq === previewSeq) $("preview").innerHTML = `<p class="msg warn">${esc(e.message)}</p>`;
     }
   }
 
-  /* ---------- Views ---------- */
-  function showEditor() {
-    currentView = null;
-    $("viewer").hidden = true;
-    $("editor").hidden = false;
-    markCurrent();
-  }
+  /* ---------- Viewing entries ---------- */
+  function showEditor() { currentView = null; $("viewer").hidden = true; $("editor").hidden = false; markCurrent(); }
+
   async function viewEntry(path) {
-    if (!connected) return;
-    currentView = { path, sha: null, text: "" };
+    currentView = { path };
     $("editor").hidden = true;
     $("viewer").hidden = false;
-    setMsg($("viewMsg"), "");
-    setMsg($("addMsg"), "");
+    setMsg($("viewMsg"), ""); setMsg($("addMsg"), "");
     $("viewBody").innerHTML = '<p class="hint">Opening entry…</p>';
-    $("historyLink").href = `https://github.com/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/commits/${encodeURIComponent(cfg.branch)}/${encPath(path)}`;
+    const own = folderOf(path) === me.folder;
+    $("addTitle").textContent = own ? "Add an addendum" : "Add an instructor note";
+    $("addBtn").textContent = own ? "Append addendum" : "Append note";
+    $("addHint").textContent = own
+      ? "Saved entries aren’t rewritten. Corrections and later observations are added at the end with the date and your name, and every earlier version is kept."
+      : "Your note is added to the end of the student’s entry with the date and your name. The student sees it the next time they open the entry.";
+    if (me.isInstructor) {
+      $("historyLink").hidden = false;
+      $("historyLink").href = `https://github.com/${me.repo}/commits/${encodeURIComponent(me.branch)}/${encPath(path)}`;
+    }
     markCurrent();
     try {
-      const { text, sha } = await getText(path);
+      const text = await run("getEntry", path);
       if (!currentView || currentView.path !== path) return;
-      currentView.sha = sha; currentView.text = text;
       renderEntry(path, text);
     } catch (e) {
       $("viewBody").innerHTML = "";
       setMsg($("viewMsg"), e.message, "warn");
     }
   }
+
   function renderEntry(path, text) {
     const body = $("viewBody");
     renderMarkdown(text, body);
@@ -608,7 +491,10 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       const src = img.getAttribute("src");
       if (!isRelative(src)) return;
       img.alt = img.alt || src;
-      try { img.src = await getBlobUrl(resolvePath(dir, src)); } catch { img.replaceWith(document.createTextNode(`[image not found: ${src}]`)); }
+      try {
+        const a = await run("getAsset", resolvePath(dir, src));
+        img.src = `data:${a.mime};base64,${a.b64}`;
+      } catch (e) { img.replaceWith(document.createTextNode(`[image not found: ${src}]`)); }
     });
     body.querySelectorAll("a").forEach(a => {
       const href = a.getAttribute("href");
@@ -616,11 +502,15 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       a.addEventListener("click", async (ev) => {
         ev.preventDefault();
         try {
-          const url = await getBlobUrl(resolvePath(dir, href));
+          setMsg($("viewMsg"), `Downloading ${href.split("/").pop()}…`);
+          const f = await run("getAsset", resolvePath(dir, href));
+          const bin = atob(f.b64);
+          const url = URL.createObjectURL(new Blob([Uint8Array.from(bin, c => c.charCodeAt(0))], { type: f.mime }));
           const tmp = document.createElement("a");
           tmp.href = url; tmp.download = href.split("/").pop();
           document.body.appendChild(tmp); tmp.click(); tmp.remove();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
+          setMsg($("viewMsg"), "");
         } catch (e) { setMsg($("viewMsg"), e.message, "warn"); }
       });
     });
@@ -633,55 +523,37 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     });
   }
   async function loadEntries() {
-    const empty = $("entriesEmpty");
     try {
-      const res = await api(`${repoBase()}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
-      const tree = (await res.json()).tree || [];
-      allPaths = tree.filter(t => t.type === "blob" && /^entries\/.+\.md$/i.test(t.path) && !/\/assets\//.test(t.path))
-        .map(t => t.path)
-        .sort((a, b) => b.split("/").pop().localeCompare(a.split("/").pop()));
+      allPaths = await run("listEntries");
       buildWhoSelect();
       renderList();
     } catch (e) {
       allPaths = [];
       $("entryList").innerHTML = "";
-      $("whoWrap").hidden = true;
-      empty.hidden = false;
-      empty.textContent = e.status === 404 || e.status === 409
-        ? "No entries yet. Your first saved entry will appear here."
-        : e.message;
+      $("entriesEmpty").hidden = false;
+      $("entriesEmpty").textContent = e.message;
     }
   }
-
-  // The filter only appears when the repository holds more than one student's folder
-  // (a shared class repository, or the instructor looking across notebooks).
+  // Students only ever receive their own entries from the server; instructors get a filter.
   function buildWhoSelect() {
-    const sel = $("whoSelect");
-    const prev = sel.value;
-    const mine = studentFolder();
-    const others = [...new Set(allPaths.map(folderOf))].filter(f => f && f !== mine).sort();
-    const hasLegacy = allPaths.some(p => !folderOf(p));
+    if (!me.isInstructor) { $("whoWrap").hidden = true; return; }
+    const sel = $("whoSelect"), prev = sel.value;
+    const folders = [...new Set(allPaths.map(folderOf))].filter(Boolean).sort();
     sel.innerHTML = "";
-    const opt = (value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; sel.appendChild(o); };
-    opt(mine, `My entries (${mine})`);
-    others.forEach(f => opt(f, f));
-    if (hasLegacy) opt("__legacy", "Not in a student folder");
-    opt("__all", "Everyone");
-    $("whoWrap").hidden = !(others.length || hasLegacy);
-    sel.value = [...sel.options].some(o => o.value === prev) ? prev : mine;
+    const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
+    opt("__all", "Every student");
+    folders.forEach(f => opt(f, f === me.folder ? `${f} (you)` : f));
+    $("whoWrap").hidden = false;
+    sel.value = [...sel.options].some(o => o.value === prev) ? prev : "__all";
   }
-
   function renderList() {
     const list = $("entryList"), empty = $("entriesEmpty");
-    const who = $("whoSelect").value || studentFolder();
-    const paths = allPaths.filter(p =>
-      who === "__all" ? true : who === "__legacy" ? !folderOf(p) : folderOf(p) === who);
-    const showFolder = who === "__all";
+    const who = me.isInstructor ? ($("whoSelect").value || "__all") : me.folder;
+    const paths = allPaths.filter(p => who === "__all" || folderOf(p) === who);
+    const showFolder = me.isInstructor && who === "__all";
     list.innerHTML = "";
     empty.hidden = paths.length > 0;
-    empty.textContent = who === studentFolder()
-      ? "No entries yet. Your first saved entry will appear here."
-      : "No entries here.";
+    empty.textContent = me.isInstructor ? "No entries here yet." : "No entries yet. Your first saved entry will appear here.";
     paths.forEach(p => {
       const file = p.split("/").pop().replace(/\.md$/i, "");
       const m = file.match(/^(\d{4}-\d{2}-\d{2})-?(.*)$/);
@@ -691,7 +563,7 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
       const b = document.createElement("button");
       b.type = "button"; b.dataset.path = p;
       b.textContent = words.charAt(0).toUpperCase() + words.slice(1);
-      const metaText = [date, showFolder ? (folderOf(p) || "no folder") : ""].filter(Boolean).join(", ");
+      const metaText = [date, showFolder ? folderOf(p) : ""].filter(Boolean).join(", ");
       if (metaText) { const d = document.createElement("span"); d.className = "d"; d.textContent = metaText; b.prepend(d); }
       b.onclick = () => viewEntry(p);
       li.appendChild(b);
@@ -700,114 +572,62 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     markCurrent();
   }
 
-  /* ---------- Connection ---------- */
-  function fillConn() { ["owner", "repo", "branch", "author", "token"].forEach(k => { $(k).value = cfg[k] || ""; }); }
-  async function connect(quiet) {
-    const msg = $("connMsg");
-    setMsg(msg, "Connecting…");
-    setStatus("Connecting…");
-    try {
-      const repo = await (await api(repoBase())).json();
-      if (repo.permissions && repo.permissions.push === false) {
-        throw new Error("This token can read the repository but can’t write to it. Give it Contents: Read and write access.");
-      }
-      try { await api(`${repoBase()}/branches/${encodeURIComponent(cfg.branch)}`); }
-      catch (e) {
-        if (e.status === 404) throw new Error(`The branch “${cfg.branch}” doesn’t exist in ${cfg.owner}/${cfg.repo}. If the repository is empty, add a README on GitHub first; otherwise check the branch name (often “main”).`);
-        throw e;
-      }
-      try { login = ((await (await api("/user")).json()).login || "").trim(); }
-      catch { login = ""; } // falls back to a folder named from "Your name"
-      connected = true;
-      setStatus(`Connected to ${cfg.owner}/${cfg.repo}${login ? ` as ${login}` : ""}`, "ok");
-      setMsg(msg, "Connected.", "ok");
-      $("connDetails").open = false;
-      await loadEntries();
-    } catch (e) {
-      connected = false;
-      setStatus("Not connected", "warn");
-      setMsg(msg, e.message, "warn");
-      $("connDetails").open = true;
-      if (!quiet) $("token").focus();
-    }
-  }
-
-  /* ---------- Save entry ---------- */
+  /* ---------- Saving ---------- */
   async function commitEntry() {
     if (busy) return;
     const msg = $("commitMsg");
-    if (!connected) {
-      setMsg(msg, "Connect to your notebook repository first.", "warn");
-      $("connDetails").open = true; $("owner").focus();
-      return;
-    }
-    if (!cfg.author.trim()) {
-      setMsg(msg, "Add your name in the connection panel so the entry is signed.", "warn");
-      $("connDetails").open = true; $("author").focus();
+    if (!me.name) {
+      setMsg(msg, "Add and save your name first, so the entry is signed.", "warn");
+      $("author").focus();
       return;
     }
     const v = values();
     document.querySelectorAll(".field.missing").forEach(el => el.classList.remove("missing"));
     const missing = FIELDS.filter(f => f.req && !(v[f.id] || "").trim());
     if (missing.length) {
-      showTab(false);
+      await showTab(false);
       missing.forEach(f => $(`f-${f.id}`).classList.add("missing"));
       setMsg(msg, `Fill in before saving: ${missing.map(f => f.label.toLowerCase()).join(", ")}.`, "warn");
       $(missing[0].id).focus();
       return;
     }
+    const total = attachments.reduce((s, a) => s + a.file.size, 0);
+    if (total > me.maxEntryBytes) {
+      setMsg(msg, "The attached files add up to more than 25 MB. Split them across entries or store some elsewhere.", "warn");
+      return;
+    }
     busy = true;
     $("commitBtn").disabled = true; $("discardBtn").disabled = true;
-    let uploaded = 0;
     try {
-      setMsg(msg, "Checking the notebook…");
-      const dir = `entries/${studentFolder()}/${v.date.slice(0, 4)}`;
-      const base = `${v.date}-${slugify(v.title)}`;
-      let name = base, n = 2;
-      while (await exists(`${dir}/${name}.md`)) name = `${base}-${n++}`;
-      const assetBase = `assets/${name}`;
-      for (const a of attachments) {
-        setMsg(msg, `Uploading ${a.name} (${uploaded + 1} of ${attachments.length})…`);
-        const b64 = bytesToB64(new Uint8Array(await a.file.arrayBuffer()));
-        await putFile(`${dir}/${assetBase}/${a.name}`, b64, `Data for “${v.title.trim()}”: ${a.name}`);
-        uploaded++;
-      }
-      setMsg(msg, "Saving entry…");
-      const path = `${dir}/${name}.md`;
-      await putFile(path, utf8ToB64(buildMarkdown(v, assetBase)), `Notebook entry: ${v.title.trim()} (${v.date})`);
+      setMsg(msg, attachments.length ? "Uploading entry and data files…" : "Saving entry…");
+      const files = await Promise.all(attachments.map(async a => ({ name: a.name, b64: await fileToB64(a.file) })));
+      const path = await run("saveEntry", { fields: v, files });
       clearForm();
       setMsg(msg, "Your text is kept as a draft in this browser until you save.");
-      $("whoSelect").value = "";
       await loadEntries();
       await viewEntry(path);
       setMsg($("viewMsg"), "Saved to notebook.", "ok");
     } catch (e) {
-      const partial = uploaded ? ` ${uploaded} data file${uploaded > 1 ? "s were" : " was"} already uploaded; saving again will upload fresh copies under a new name.` : "";
-      setMsg(msg, e.message + partial + " Your draft is still here.", "warn");
+      setMsg(msg, e.message + " Your draft is still here.", "warn");
     } finally {
       busy = false;
       $("commitBtn").disabled = false; $("discardBtn").disabled = false;
     }
   }
 
-  /* ---------- Addendum ---------- */
   async function appendAddendum() {
     if (busy || !currentView) return;
     const text = $("addText").value.trim();
     const msg = $("addMsg");
     if (!text) { setMsg(msg, "Write the addendum first.", "warn"); $("addText").focus(); return; }
+    if (!me.name) { setMsg(msg, "Add and save your name first.", "warn"); $("author").focus(); return; }
     busy = true; $("addBtn").disabled = true;
     try {
-      setMsg(msg, "Saving addendum…");
-      const { text: current, sha } = await getText(currentView.path);
-      const who = cfg.author.trim() ? ` (${cfg.author.trim()})` : "";
-      const updated = current.replace(/\s*$/, "") + `\n\n---\n\n## Addendum, ${stamp()}${who}\n\n${text}\n`;
-      const res = await putFile(currentView.path, utf8ToB64(updated), `Addendum: ${currentView.path.split("/").pop()}`, sha);
-      currentView.sha = res.content && res.content.sha;
-      currentView.text = updated;
+      setMsg(msg, "Saving…");
+      const updated = await run("appendAddendum", currentView.path, text);
       renderEntry(currentView.path, updated);
       $("addText").value = "";
-      setMsg(msg, "Addendum saved.", "ok");
+      setMsg(msg, "Saved.", "ok");
     } catch (e) {
       setMsg(msg, e.message, "warn");
     } finally {
@@ -815,59 +635,60 @@ ul.files .size { color: var(--muted); font-variant-numeric: tabular-nums; margin
     }
   }
 
-  /* ---------- Wire up ---------- */
-  buildForm();
-  fillConn();
-  restoreDraft();
+  async function saveName() {
+    const msg = $("nameMsg");
+    try {
+      setMsg(msg, "Saving…");
+      me.name = await run("setName", $("author").value);
+      $("author").value = me.name;
+      setMsg(msg, "Saved.", "ok");
+    } catch (e) { setMsg(msg, e.message, "warn"); }
+  }
 
-  $("entryForm").addEventListener("input", (e) => {
-    if (e.target.type !== "file") saveDraft();
-    const f = e.target.closest(".field");
-    if (f && e.target.value.trim()) f.classList.remove("missing");
-  });
-  $("entryForm").addEventListener("submit", (e) => e.preventDefault());
-  $("files").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
-  $("tabWrite").onclick = () => showTab(false);
-  $("tabPreview").onclick = () => showTab(true);
-  $("commitBtn").onclick = commitEntry;
-  $("discardBtn").onclick = () => {
-    if (confirm("Discard this draft? All text and attached files will be cleared.")) {
-      clearForm(); showTab(false);
-      setMsg($("commitMsg"), "Draft discarded.");
+  /* ---------- Start ---------- */
+  async function start() {
+    try {
+      me = await run("whoami");
+    } catch (e) {
+      setStatus("Not signed in", "warn");
+      $("blocked").hidden = false;
+      setMsg($("blockedMsg"), e.message, "warn");
+      return;
     }
-  };
-  $("newBtn").onclick = () => { showEditor(); showTab(false); $("title").focus(); };
-  $("backBtn").onclick = () => { showEditor(); showTab(false); };
-  $("addBtn").onclick = appendAddendum;
-  $("whoSelect").addEventListener("change", renderList);
+    setStatus(me.isInstructor ? `Signed in as ${me.email} (instructor)` : `Signed in as ${me.email}`, "ok");
+    $("whoEmail").textContent = me.email;
+    $("author").value = me.name || "";
+    if (!me.name) setMsg($("nameMsg"), "Add your name to start saving entries.", "warn");
+    $("app").hidden = false;
+    buildForm();
+    restoreDraft();
 
-  $("connForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    cfg = {
-      owner: $("owner").value.trim(),
-      repo: $("repo").value.trim(),
-      branch: $("branch").value.trim() || "main",
-      author: $("author").value.trim(),
-      token: $("token").value.trim()
+    $("entryForm").addEventListener("input", (e) => {
+      if (e.target.type !== "file") saveDraft();
+      const f = e.target.closest(".field");
+      if (f && e.target.value.trim()) f.classList.remove("missing");
+    });
+    $("entryForm").addEventListener("submit", (e) => e.preventDefault());
+    $("files").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+    $("tabWrite").onclick = () => showTab(false);
+    $("tabPreview").onclick = () => showTab(true);
+    $("commitBtn").onclick = commitEntry;
+    $("discardBtn").onclick = () => {
+      if (confirm("Discard this draft? All text and attached files will be cleared.")) {
+        clearForm(); showTab(false);
+        setMsg($("commitMsg"), "Draft discarded.");
+      }
     };
-    store.set(CFG_KEY, cfg);
-    connect(false);
-  });
-  $("forgetBtn").onclick = () => {
-    cfg.token = ""; $("token").value = "";
-    store.set(CFG_KEY, cfg);
-    connected = false;
-    login = ""; allPaths = [];
-    $("whoWrap").hidden = true;
-    setStatus("Not connected");
-    setMsg($("connMsg"), "Token removed from this browser.", "ok");
-    $("entryList").innerHTML = "";
-    $("entriesEmpty").hidden = false;
-    $("entriesEmpty").textContent = "Connect to see your saved entries.";
-    showEditor();
-  };
+    $("newBtn").onclick = () => { showEditor(); showTab(false); $("title").focus(); };
+    $("backBtn").onclick = () => { showEditor(); showTab(false); };
+    $("addBtn").onclick = appendAddendum;
+    $("saveName").onclick = saveName;
+    $("author").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveName(); } });
+    $("whoSelect").addEventListener("change", renderList);
 
-  if (cfg.owner && cfg.repo && cfg.token) connect(true);
+    loadEntries();
+  }
+  start();
 })();
 </script>
 </body>

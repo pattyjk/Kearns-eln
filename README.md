@@ -1,68 +1,83 @@
-# Lab notebook
+# Lab notebook (school-account version)
 
-A form-based electronic lab notebook that saves each entry as a Markdown file in a GitHub repository. Students fill in structured fields (hypothesis, prediction, materials, procedure, results, interpretation), attach data files, and click save. The app writes the Markdown and commits it, so every entry is timestamped, signed, and versioned by Git.
+Students open one link, sign in with their UMass Boston account, and fill in the notebook form. They never need a GitHub account. A Google Apps Script web app, running under your account, checks who each student is and commits their entries to a private GitHub repository using your token, which students never see.
 
-The whole app is one file, `index.html`. It has no server and stores no data of its own: it talks directly to the GitHub API from the student’s browser.
+```
+student’s browser  ──(UMB Google sign-in)──▶  Apps Script web app  ──(your token)──▶  private GitHub repo
+```
+
+## Files
+
+| File | Where it goes |
+|---|---|
+| `Code.gs` | The server: identity checks, access rules, Markdown, GitHub commits |
+| `Index.html` | The notebook page students see |
+| `appsscript.json` | The project manifest (time zone, permissions, web app settings) |
 
 ## How entries are stored
 
 ```
 entries/
-  jsmith-umb/                      ← one folder per student (their GitHub username)
+  jsmith/                 ← the part of the student’s email before @umb.edu
     2026/
       2026-10-27-pcr-optimization.md
-      assets/
-        2026-10-27-pcr-optimization/
-          gel-lane-1-6.png
-          plate-reader.csv
-  apatel22/
-    2026/
-      ...
+      assets/2026-10-27-pcr-optimization/gel-lane-1-6.png
 ```
 
-The folder name is the student’s GitHub username, read from their token when they connect, so it’s unique and students can’t mistype it. If the username can’t be read, the folder is named from “Your name” instead.
+Each entry has YAML front matter (title, date, author, student email, course, recorded timestamp). The timestamp comes from Google’s server, not the student’s computer.
 
-When a repository holds more than one student’s folder, a “Showing” menu appears above the entries list: “My entries” by default, any other student’s folder, or everyone at once (with each entry labeled by folder). Entries saved before folders were added stay where they are and appear under “Not in a student folder”.
+## Setup (about 20 minutes, once)
 
-Each entry has YAML front matter (title, date, author, student username, course, recorded timestamp), so the folder can later be rendered with Jekyll or Quarto without changes. GitHub also renders the entries and their images directly in the repository, which is the easiest place to read and grade them.
+**1. Make the GitHub repository.** Create a private repository, for example `biot-notebooks`, with a README so the `main` branch exists. Under Settings → Branches, add a rule for `main` that blocks force pushes and deletion.
 
-Saved entries are never rewritten by the app. Corrections are appended as dated, signed addenda, and the full version history is one click away.
+**2. Make a token.** GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.
+- Repository access: Only select repositories → `biot-notebooks`
+- Repository permissions: Contents → Read and write
+- Expiration: the end of the academic year (put a reminder in your calendar to renew it)
 
-## Instructor setup (once per course)
+**3. Create the Apps Script project.** Sign in to Google with your UMass Boston account and go to script.google.com → New project. Name it “Lab notebook”.
+- In Project Settings, tick “Show ‘appsscript.json’ manifest file in editor”, then replace the contents of `appsscript.json` with the provided file.
+- Replace the contents of `Code.gs` with the provided file.
+- Add a file (+ → HTML) named `Index` and paste in `Index.html`.
 
-1. **Create a template repository.** Make a new private repository (e.g. `biot7245-notebook-template`) with a README and an empty `entries/` folder (add an `entries/.gitkeep` file). Under Settings, tick “Template repository”.
-2. **Host the app.** Put `index.html` in a *public* repository that contains nothing else, such as `eln-app`, and turn on GitHub Pages for it (Settings → Pages → deploy from the main branch). The app is then at `https://<your-account>.github.io/eln-app/`.
-   Don’t put the app inside students’ notebook repositories: GitHub Pages would publish their entries publicly.
-3. **Create the GitHub Classroom assignment** from the template repository, with private student repositories. Each student who accepts gets their own notebook repository in the classroom organization.
-4. **Allow fine-grained tokens for the classroom organization.** In the organization’s Settings → Personal access tokens, allow fine-grained tokens. If you leave approval required, you’ll approve each student’s token request once at the start of term.
-5. **Share a prefilled link.** Adding `?owner=<classroom-org>` to the app URL fills that field in for students, e.g.
-   `https://<your-account>.github.io/eln-app/?owner=umb-biot7245`. You can also add `&repo=` and `&branch=`.
+**4. Add script properties.** Project Settings → Script properties:
 
-## Student setup (once per term)
+| Property | Value |
+|---|---|
+| `GITHUB_TOKEN` | the token from step 2 |
+| `GITHUB_OWNER` | your GitHub username (or organization) |
+| `GITHUB_REPO` | `biot-notebooks` |
+| `INSTRUCTORS` | your email, plus any TAs, comma-separated |
+| `ROSTER` | optional: student emails, comma-separated. Leave it out to allow anyone with a UMB account. |
+| `GITHUB_BRANCH`, `ALLOWED_DOMAIN` | optional: default to `main` and `umb.edu` |
 
-1. Accept the GitHub Classroom invitation. Note your repository name.
-2. Create a token: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.
-   - **Resource owner:** the classroom organization
-   - **Expiration:** the end of the semester
-   - **Repository access:** Only select repositories → your notebook repository
-   - **Repository permissions:** Contents → Read and write
-3. Open the app link, fill in the connection panel (organization, repository, branch `main`, your name, token) and click Connect.
+**5. Deploy.** Deploy → New deployment → type: Web app.
+- Execute as: **Me**
+- Who has access: **Anyone within UMass Boston**
 
-On a shared lab computer, click “Forget token” before leaving.
+Authorize when prompted (this lets the script contact GitHub and read the signed-in user’s email). Copy the web app URL.
 
-## What students see
+**6. Test, then share.** Open the URL yourself: you should see “(instructor)” next to your email. Save a test entry and check it appears in the GitHub repository. Then post the link in Canvas or Blackboard.
 
-- A notebook page with the six sections in order; the hypothesis, procedure and observations are required before an entry can be saved.
-- A Preview tab showing exactly how the entry will read, including attached images.
-- Automatic draft saving in the browser while they type (attached files aren’t kept in the draft).
-- A list of their saved entries, each viewable in the app with an “Add an addendum” box and a link to its version history.
+**Updating the code later:** Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy. The URL stays the same.
 
-## Limits
+## What students and instructors can do
 
-- Data files over 25 MB are refused; record where large files live (e.g. a shared drive path) in the entry instead.
-- The token is kept in the browser’s local storage and sent only to `api.github.com`. Anyone with access to that browser profile could use it until it’s removed or expires, which is why tokens should be limited to the one repository.
-- Git history makes backdating visible but doesn’t make it impossible: anyone with admin rights on a repository can rewrite history. Protecting the `main` branch against force pushes closes most of that gap. This is appropriate for coursework and internal lab records, not for regulated (21 CFR Part 11) work.
+Students see and open only their own entries; the server enforces this, not the page. They can add dated, signed addenda to their own entries but can’t edit or delete anything, and have no access to the repository or its history.
+
+Instructors (anyone in `INSTRUCTORS`) get a “Showing” menu to view every student or one student at a time, a link to each entry’s history on GitHub, and can add an “Instructor note” to any entry, which the student sees the next time they open it. You can also read everything directly in the GitHub repository, where entries and images render natively.
+
+In the Git history, each commit is authored by the student’s name and UMB email and committed through your token, so authorship and timing are traceable for every change.
+
+## Things to know
+
+- **Sign-in confusion:** Students signed in to a personal Gmail account may be shown as the wrong account. The page tells them which account it sees and asks them to switch. A separate browser profile for their UMB account avoids this, as UMB IT also recommends.
+- **IT restrictions:** If UMB’s Google Workspace administrators have restricted Apps Script web apps or outside connections, step 5 or the first save may fail with a permissions message. That would need a request to the IT Service Desk.
+- **Drafts:** Drafts are kept in the student’s browser. If the browser blocks storage for embedded pages, drafts won’t persist across reloads, though saving still works.
+- **File sizes:** Data files are limited to 10 MB each and 25 MB per entry. Larger files should be stored on OneDrive or Google Drive, with the location recorded in the entry.
+- **Names:** Each student’s name is saved once and kept in the script properties, so it follows them across devices.
+- **Regulated work:** This is suited to coursework and internal lab records, not regulated (21 CFR Part 11) work.
 
 ## Customizing the template
 
-The fields are defined in the `FIELDS` and `SECTIONS` arrays near the top of the script in `index.html`. Each field has a label, an optional hint, a size, and whether it’s required; the Markdown headings follow the labels in `buildMarkdown`. Adding, for example, a “Safety considerations” field means one line in `FIELDS` and one `sec(...)` line in `buildMarkdown`.
+The form fields are defined in `FIELDS` in `Index.html`. The server accepts the keys listed in `TEXT_KEYS` and builds the Markdown in `buildMarkdown_` in `Code.gs`. To add a field, such as “Safety considerations”, add it in all three places.
